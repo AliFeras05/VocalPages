@@ -76,7 +76,7 @@ class LibrarySidebar(QWidget):
         self.list.itemClicked.connect(lambda item: self.book_selected.emit(item.data(_ID_ROLE)))
 
         self.empty_label = QLabel("No books yet.", self)
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.empty_label.setStyleSheet("color: palette(placeholder-text);")
 
         layout = QVBoxLayout(self)
@@ -84,8 +84,8 @@ class LibrarySidebar(QWidget):
         layout.addWidget(self.home_button)
         layout.addSpacing(8)
         layout.addWidget(heading)
-        layout.addWidget(self.list, 1)
         layout.addWidget(self.empty_label)
+        layout.addWidget(self.list, 1)
         self._rows: dict[str, _BookRow] = {}
 
     def set_books(self, books: list[BookRecord], current_id: str | None = None) -> None:
@@ -103,7 +103,6 @@ class LibrarySidebar(QWidget):
             self._rows[record.id] = row
             if record.id == current_id:
                 item.setSelected(True)
-        self.list.setVisible(bool(books))
         self.empty_label.setVisible(not books)
 
     def update_progress(self, book_id: str, text: str) -> None:

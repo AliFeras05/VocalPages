@@ -6,12 +6,13 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QThread, Slot
+from PySide6.QtCore import QEvent, QObject, Qt, QThread, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDropEvent,
     QKeySequence,
     QMouseEvent,
@@ -21,14 +22,12 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
-    QFrame,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
     QSplitter,
-    QPushButton,
     QSpinBox,
     QStackedWidget,
     QTextEdit,
@@ -42,6 +41,7 @@ from readaloud.document import Document, DocumentError
 from readaloud.export import ExportResult, output_format, resolve_section_range
 from readaloud.export_dialog import ExportWorker, RangeDialog
 from readaloud.playback import PlayerState, Reader
+from readaloud.home import FILE_DIALOG_FILTER, HomePage, is_supported, local_file_from_mime
 from readaloud.library import BookRecord, Library
 from readaloud.sidebar import LibrarySidebar
 from readaloud.sentences import locate_sentences, sentence_at
@@ -50,40 +50,6 @@ from readaloud.tts import KokoroEngine
 HIGHLIGHT_COLOR = QColor(255, 230, 140)
 HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light and dark themes
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
-
-
-def pdf_from_mime(mime: QMimeData) -> Path | None:
-    """Return the first local ``.pdf`` file in dragged data, or None."""
-    for url in mime.urls():
-        if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf"):
-            return Path(url.toLocalFile())
-    return None
-
-
-class StartScreen(QFrame):
-    """Shown before a PDF is open: invites the user to drop or choose a file."""
-
-    def __init__(self, open_action: QAction, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("startScreen")
-        self.setStyleSheet(
-            "#startScreen { border: 2px dashed palette(mid); border-radius: 16px; }"
-        )
-        title = QLabel("Drop a PDF here", self)
-        font = title.font()
-        font.setPointSize(font.pointSize() + 10)
-        font.setBold(True)
-        title.setFont(font)
-        hint = QLabel("or", self)
-        button = QPushButton("Choose a PDF…", self)
-        button.setMinimumHeight(36)
-        button.clicked.connect(open_action.trigger)
-
-        layout = QVBoxLayout(self)
-        layout.addStretch()
-        for widget in (title, hint, button):
-            layout.addWidget(widget, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addStretch()
 
 
 class MainWindow(QMainWindow):
@@ -121,7 +87,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
         self.toolbar = toolbar
 
-        self.open_action = QAction("Open PDF…", self, shortcut=QKeySequence.StandardKey.Open)
+        self.open_action = QAction("Open…", self, shortcut=QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.choose_file)
         self.play_action = QAction("Play", self, shortcut=Qt.Key.Key_Space)
         self.play_action.triggered.connect(self._toggle_play)
@@ -181,13 +147,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.page_label)
         layout.addWidget(self.text_view)
 
-        start_container = QWidget(self)
-        start_layout = QVBoxLayout(start_container)
-        start_layout.setContentsMargins(40, 40, 40, 40)
-        start_layout.addWidget(StartScreen(self.open_action, start_container))
+        self.home = HomePage(self)
+        self.home.choose_requested.connect(self.choose_file)
 
         self.stack = QStackedWidget(self)
-        self.stack.addWidget(start_container)
+        self.stack.addWidget(self.home)
         self.stack.addWidget(reading_view)
 
         self.sidebar = LibrarySidebar(self)
@@ -218,21 +182,36 @@ class MainWindow(QMainWindow):
     @Slot()
     def choose_file(self) -> None:
         """Ask the user for a document and open it."""
-        path, _ = QFileDialog.getOpenFileName(self, "Open PDF", str(Path.home()), "PDF files (*.pdf)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open a book", str(Path.home()), FILE_DIALOG_FILTER)
         if path:
             self.open_file(Path(path))
 
     def open_file(self, path: Path) -> None:
-        """Add the file at ``path`` to the library (or find it there) and open it."""
+        """Add the file at ``path`` to the library (or find it there) and open it.
+
+        Problems are reported inline on the home page, or in a dialog while reading.
+        """
+        if not is_supported(path):
+            self._report_open_error(
+                f"“{path.name}” can't be opened. Readaloud reads PDF (.pdf) and EPUB (.epub) files."
+            )
+            return
         try:
             record, document, _is_new = self._library.add(path)
         except DocumentError as exc:
-            self._show_error(str(exc))
+            self._report_open_error(f"“{path.name}” can't be opened. {exc}")
             return
         except OSError:
-            self._show_error(f"Could not read {path.name}.")
+            self._report_open_error(f"Could not read “{path.name}”.")
             return
+        self.home.clear_error()
         self._show_document(record, document)
+
+    def _report_open_error(self, message: str) -> None:
+        if self.stack.currentIndex() == 0:
+            self.home.show_error(message)
+        else:
+            self._show_error(message)
 
     @Slot(str)
     def open_book(self, book_id: str) -> None:
@@ -501,13 +480,20 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 (Qt API name)
-        """Accept drags that contain a PDF file."""
-        if pdf_from_mime(event.mimeData()) is not None:
+        """Accept any local file; unsupported ones get an error message on drop."""
+        if local_file_from_mime(event.mimeData()) is not None:
             event.acceptProposedAction()
+            self.home.set_drag_active(True)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:  # noqa: N802 (Qt API name)
+        """Remove the drop-area highlight."""
+        self.home.set_drag_active(False)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 (Qt API name)
-        """Open a PDF dropped onto the window."""
-        path = pdf_from_mime(event.mimeData())
+        """Add and open a book dropped anywhere on the window."""
+        self.home.set_drag_active(False)
+        path = local_file_from_mime(event.mimeData())
         if path is not None:
             event.acceptProposedAction()
             self.open_file(path)
