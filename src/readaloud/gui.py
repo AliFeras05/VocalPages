@@ -1,5 +1,5 @@
 """Qt main window. Only widgets and wiring live here; the work happens in
-``pdf_extract``, ``playback`` and ``export``."""
+``document`` (and its loaders), ``playback`` and ``export``."""
 
 from __future__ import annotations
 
@@ -35,12 +35,12 @@ from PySide6.QtWidgets import (
 )
 
 from readaloud import APP_NAME
-from readaloud.export import ExportResult, output_format, resolve_page_range
-from readaloud.export_dialog import ExportWorker, PageRangeDialog
-from readaloud.pdf_extract import PdfError, extract_pages
+from readaloud.document import DocumentError, load_document
+from readaloud.export import ExportResult, output_format, resolve_section_range
+from readaloud.export_dialog import ExportWorker, RangeDialog
 from readaloud.playback import PlayerState, Reader
 from readaloud.state import ResumeStore, fingerprint
-from readaloud.tts import KokoroEngine, locate_segments, normalize_page_text
+from readaloud.tts import KokoroEngine, locate_segments
 
 HIGHLIGHT_COLOR = QColor(255, 230, 140)
 HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light and dark themes
@@ -95,8 +95,8 @@ class MainWindow(QMainWindow):
         self._engine = engine or KokoroEngine()
         self._reader = Reader(self._engine, self)
         self._store = resume_store or ResumeStore()
-        self._pdf_key = ""
-        self._pdf_stem = ""
+        self._doc_key = ""
+        self._doc_stem = ""
         self._export_thread: QThread | None = None
         self._export_worker: ExportWorker | None = None
         self._export_progress: QProgressDialog | None = None
@@ -116,28 +116,29 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         self.open_action = QAction("Open PDF…", self, shortcut=QKeySequence.StandardKey.Open)
-        self.open_action.triggered.connect(self.choose_pdf)
+        self.open_action.triggered.connect(self.choose_file)
         self.play_action = QAction("Play", self, shortcut=Qt.Key.Key_Space)
         self.play_action.triggered.connect(self._toggle_play)
         self.stop_action = QAction("Stop", self)
         self.stop_action.triggered.connect(self._reader.stop)
         self.prev_action = QAction("◀ Previous", self, shortcut=Qt.Key.Key_PageUp)
-        self.prev_action.triggered.connect(lambda: self._reader.go_to_page(self._reader.current_page - 1))
+        self.prev_action.triggered.connect(lambda: self._reader.go_to_section(self._reader.current_section - 1))
         self.next_action = QAction("Next ▶", self, shortcut=Qt.Key.Key_PageDown)
-        self.next_action.triggered.connect(lambda: self._reader.go_to_page(self._reader.current_page + 1))
+        self.next_action.triggered.connect(lambda: self._reader.go_to_section(self._reader.current_section + 1))
 
         for action in (self.open_action, self.play_action, self.stop_action, self.prev_action, self.next_action):
             toolbar.addAction(action)
 
         toolbar.addSeparator()
-        toolbar.addWidget(QLabel(" Go to page ", self))
-        self.page_spin = QSpinBox(self)
-        self.page_spin.setMinimum(1)
-        self.page_spin.setKeyboardTracking(False)
-        self.page_spin.editingFinished.connect(self._jump_to_spin_page)
-        toolbar.addWidget(self.page_spin)
+        self.goto_label = QLabel(" Go to page ", self)
+        toolbar.addWidget(self.goto_label)
+        self.section_spin = QSpinBox(self)
+        self.section_spin.setMinimum(1)
+        self.section_spin.setKeyboardTracking(False)
+        self.section_spin.editingFinished.connect(self._jump_to_spin_section)
+        toolbar.addWidget(self.section_spin)
         self.go_action = QAction("Go", self)
-        self.go_action.triggered.connect(self._jump_to_spin_page)
+        self.go_action.triggered.connect(self._jump_to_spin_section)
         toolbar.addAction(self.go_action)
 
         toolbar.addSeparator()
@@ -157,7 +158,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.export_action)
 
     def _build_layout(self) -> None:
-        self.page_label = QLabel("No PDF open", self)
+        self.page_label = QLabel("No document open", self)
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.text_view = QPlainTextEdit(self)
@@ -182,9 +183,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
     def _connect_reader(self) -> None:
-        self._reader.page_changed.connect(self._show_page)
+        self._reader.section_changed.connect(self._show_section)
         self._reader.segment_started.connect(self._highlight_segment)
-        self._reader.page_skipped.connect(self._on_page_skipped)
+        self._reader.section_skipped.connect(self._on_section_skipped)
         self._reader.state_changed.connect(lambda _state: self._update_controls())
         self._reader.finished.connect(lambda: self.statusBar().showMessage("Finished reading.", 5000))
         self._reader.engine_ready.connect(lambda: self.statusBar().showMessage("Voice model ready.", 3000))
@@ -193,72 +194,76 @@ class MainWindow(QMainWindow):
     # ----- actions ------------------------------------------------------
 
     @Slot()
-    def choose_pdf(self) -> None:
-        """Ask the user for a PDF and open it."""
+    def choose_file(self) -> None:
+        """Ask the user for a document and open it."""
         path, _ = QFileDialog.getOpenFileName(self, "Open PDF", str(Path.home()), "PDF files (*.pdf)")
         if path:
-            self.open_pdf(Path(path))
+            self.open_file(Path(path))
 
-    def open_pdf(self, path: Path) -> None:
-        """Extract the PDF at ``path`` and show its first page."""
+    def open_file(self, path: Path) -> None:
+        """Load the document at ``path`` and show its first (or saved) section."""
         try:
-            pages = extract_pages(path)
-        except PdfError as exc:
+            document = load_document(path)
+        except DocumentError as exc:
             self._show_error(str(exc))
             return
-        if not pages:
-            self._show_error("This PDF has no pages.")
+        if not document.section_count:
+            self._show_error("This document has nothing to read.")
             return
 
-        self._pdf_key = ""  # don't record the old PDF's key while switching
+        self._doc_key = ""  # don't record the old document's key while switching
         self.stack.setCurrentIndex(1)
-        self.setWindowTitle(f"{path.name} — {APP_NAME}")
-        self._pdf_stem = path.stem
+        self.setWindowTitle(f"{document.title} — {APP_NAME}")
+        self._doc_stem = path.stem
+        unit = document.unit
+        self.goto_label.setText(f" Go to {unit.lower()} ")
         key = fingerprint(path)
-        self._reader.set_pages(pages, start_page=self._ask_resume_page(key, len(pages)))
-        self._pdf_key = key
-        self._store.set(key, self._reader.current_page)
-        empty = sum(1 for p in pages if not p.has_text)
+        start = self._ask_resume_section(key, unit, document.section_count)
+        self._reader.set_document(document, start_section=start)
+        self._doc_key = key
+        self._store.set(key, self._reader.current_section)
+        empty = sum(1 for section in document.sections if not section.has_text)
         if empty:
             self.statusBar().showMessage(
-                f"{empty} page(s) have no extractable text (scanned?) and will be skipped.", 8000
+                f"{empty} {unit.lower()}(s) have no readable text (scanned?) and will be skipped.", 8000
             )
         self._update_controls()
 
-    def _ask_resume_page(self, key: str, page_count: int) -> int:
-        """Offer to resume from the saved page; return the page to start on."""
+    def _ask_resume_section(self, key: str, unit: str, count: int) -> int:
+        """Offer to resume from the saved section; return the section to start on."""
         saved = self._store.get(key)
-        if saved is None or saved <= 1 or saved > page_count:
+        if saved is None or saved <= 1 or saved > count:
             return 1
         answer = QMessageBox.question(
             self,
             APP_NAME,
-            f"You stopped at page {saved} of {page_count} last time. Resume from there?",
+            f"You stopped at {unit.lower()} {saved} of {count} last time. Resume from there?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         return saved if answer == QMessageBox.StandardButton.Yes else 1
 
     @Slot()
-    def _jump_to_spin_page(self) -> None:
-        if self.page_spin.value() != self._reader.current_page:
-            self._reader.go_to_page(self.page_spin.value())
+    def _jump_to_spin_section(self) -> None:
+        if self.section_spin.value() != self._reader.current_section:
+            self._reader.go_to_section(self.section_spin.value())
 
     @Slot()
     def start_export(self) -> None:
-        """Ask for a page range and output file, then export on a worker thread."""
-        if self._export_thread is not None or self._reader.page_count == 0:
+        """Ask for a section range and output file, then export on a worker thread."""
+        document = self._reader.document
+        if self._export_thread is not None or document is None:
             return
-        dialog = PageRangeDialog(self._reader.page_count, self._reader.current_page, self)
-        if dialog.exec() != PageRangeDialog.DialogCode.Accepted:
+        dialog = RangeDialog(document.unit, document.section_count, self._reader.current_section, self)
+        if dialog.exec() != RangeDialog.DialogCode.Accepted:
             return
         try:
-            numbers = resolve_page_range(*dialog.selected_range(), self._reader.page_count)
+            numbers = resolve_section_range(*dialog.selected_range(), document.section_count)
         except ValueError as exc:
             self._show_error(str(exc))
             return
 
-        suggested = str(Path.home() / f"{self._pdf_stem}.mp3")
+        suggested = str(Path.home() / f"{self._doc_stem}.mp3")
         path, _ = QFileDialog.getSaveFileName(
             self, "Export audio", suggested, "MP3 audio (*.mp3);;WAV audio (*.wav)"
         )
@@ -272,7 +277,7 @@ class MainWindow(QMainWindow):
             return
 
         worker = ExportWorker(
-            self._reader.pages, numbers, out_path, self._engine, self.speed_combo.currentData()
+            document.sections, numbers, out_path, self._engine, self.speed_combo.currentData()
         )
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -305,11 +310,12 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def _on_export_finished(self, result: ExportResult) -> None:
         self._end_export()
+        document = self._reader.document
         minutes, seconds = divmod(round(result.duration_seconds), 60)
         message = f"Exported {result.path.name} ({minutes}:{seconds:02d})."
-        if result.skipped_pages:
-            pages = ", ".join(map(str, result.skipped_pages))
-            message += f"\nSkipped page(s) with no extractable text: {pages}."
+        if result.skipped_sections and document is not None:
+            skipped = ", ".join(map(str, result.skipped_sections))
+            message += f"\nSkipped {document.unit.lower()}(s) with no readable text: {skipped}."
         QMessageBox.information(self, APP_NAME, message)
 
     @Slot(str)
@@ -345,29 +351,29 @@ class MainWindow(QMainWindow):
     # ----- reader signal handlers --------------------------------------
 
     @Slot(int)
-    def _show_page(self, number: int) -> None:
-        page = self._reader.page(number)
-        self.page_label.setText(f"Page {number} of {self._reader.page_count}")
-        self.page_spin.blockSignals(True)
-        self.page_spin.setMaximum(self._reader.page_count)
-        self.page_spin.setValue(number)
-        self.page_spin.blockSignals(False)
-        if self._pdf_key:
-            self._store.set(self._pdf_key, number)
-        if page.has_text:
-            display = normalize_page_text(page.text)
-            self._spans = locate_segments(display, self._reader.segments(number))
-            self.text_view.setPlainText(display)
+    def _show_section(self, number: int) -> None:
+        section = self._reader.section(number)
+        unit = self._reader.document.unit if self._reader.document else "Page"
+        self.page_label.setText(f"{unit} {number} of {self._reader.section_count}")
+        self.section_spin.blockSignals(True)
+        self.section_spin.setMaximum(self._reader.section_count)
+        self.section_spin.setValue(number)
+        self.section_spin.blockSignals(False)
+        if self._doc_key:
+            self._store.set(self._doc_key, number)
+        if section.has_text:
+            self._spans = locate_segments(section.text, list(section.sentences))
+            self.text_view.setPlainText(section.text)
         else:
             self._spans = []
             self.text_view.setPlainText(
-                "This page has no extractable text. It may be a scanned image; it will be skipped."
+                f"This {unit.lower()} has no readable text. It may be a scanned image; it will be skipped."
             )
         self._update_controls()
 
     @Slot(int, int)
-    def _highlight_segment(self, page_number: int, index: int) -> None:
-        if page_number != self._reader.current_page or not 0 <= index < len(self._spans):
+    def _highlight_segment(self, section_number: int, index: int) -> None:
+        if section_number != self._reader.current_section or not 0 <= index < len(self._spans):
             return
         start, end = self._spans[index]
         cursor = QTextCursor(self.text_view.document())
@@ -385,9 +391,10 @@ class MainWindow(QMainWindow):
         self.text_view.ensureCursorVisible()
 
     @Slot(int)
-    def _on_page_skipped(self, number: int) -> None:
+    def _on_section_skipped(self, number: int) -> None:
+        unit = self._reader.document.unit if self._reader.document else "Page"
         self.statusBar().showMessage(
-            f"Page {number} has no extractable text (it may be a scanned image). Skipped.", 6000
+            f"{unit} {number} has no readable text (it may be a scanned image). Skipped.", 6000
         )
 
     @Slot(str)
@@ -397,13 +404,13 @@ class MainWindow(QMainWindow):
     # ----- helpers ------------------------------------------------------
 
     def _update_controls(self) -> None:
-        has_doc = self._reader.page_count > 0
+        has_doc = self._reader.section_count > 0
         state = self._reader.state
         self.play_action.setEnabled(has_doc)
-        current = self._reader.current_page
+        current = self._reader.current_section
         self.prev_action.setEnabled(has_doc and current > 1)
-        self.next_action.setEnabled(has_doc and current < self._reader.page_count)
-        self.page_spin.setEnabled(has_doc)
+        self.next_action.setEnabled(has_doc and current < self._reader.section_count)
+        self.section_spin.setEnabled(has_doc)
         self.go_action.setEnabled(has_doc)
         self.export_action.setEnabled(has_doc and self._export_thread is None)
         self.play_action.setText("Pause" if state is PlayerState.PLAYING else
@@ -422,7 +429,7 @@ class MainWindow(QMainWindow):
         path = pdf_from_mime(event.mimeData())
         if path is not None:
             event.acceptProposedAction()
-            self.open_pdf(path)
+            self.open_file(path)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt API name)
         """Stop audio and background threads before closing."""

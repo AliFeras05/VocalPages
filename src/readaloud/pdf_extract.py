@@ -17,6 +17,8 @@ from typing import Sequence
 
 import pymupdf
 
+from readaloud.document import Document, DocumentError, Section
+
 # Fraction of the page height treated as the top/bottom margin.
 MARGIN_FRACTION = 0.12
 # Short first/last blocks are also header/footer candidates even outside the margin.
@@ -33,7 +35,7 @@ _HYPHEN_KEEP_RE = re.compile(r"-\n(?=\S)")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
-class PdfError(Exception):
+class PdfError(DocumentError):
     """Raised when a PDF cannot be opened or read."""
 
 
@@ -129,22 +131,51 @@ def _read_blocks(page: pymupdf.Page) -> list[TextBlock]:
     return blocks
 
 
+def _open(path: str | Path) -> pymupdf.Document:
+    try:
+        doc = pymupdf.open(path)
+    except Exception as exc:  # PyMuPDF raises several unrelated exception types
+        raise PdfError(f"Could not open PDF: {exc}") from exc
+    if doc.needs_pass:
+        doc.close()
+        raise PdfError("This PDF is password-protected.")
+    if not doc.is_pdf:
+        doc.close()
+        raise PdfError("This file is not a PDF.")
+    return doc
+
+
+def load_pdf(path: str | Path) -> Document:
+    """Load a PDF as a ``Document`` with one section per page.
+
+    The title and author come from the PDF metadata, falling back to the file name.
+
+    Raises:
+        PdfError: if the file is missing, not a PDF, or password-protected.
+    """
+    with _open(path) as doc:
+        metadata = doc.metadata or {}
+        raw = [_read_blocks(page) for page in doc]
+    sections = tuple(
+        Section.from_text(number=i + 1, title=f"Page {i + 1}", text=text)
+        for i, text in enumerate(clean_pages(raw))
+    )
+    return Document(
+        title=(metadata.get("title") or "").strip() or Path(path).stem,
+        author=(metadata.get("author") or "").strip(),
+        format="pdf",
+        unit="Page",
+        sections=sections,
+    )
+
+
 def extract_pages(path: str | Path) -> list[Page]:
     """Open the PDF at ``path`` and return the cleaned text of every page.
 
     Raises:
         PdfError: if the file is missing, not a PDF, or password-protected.
     """
-    try:
-        doc = pymupdf.open(path)
-    except Exception as exc:  # PyMuPDF raises several unrelated exception types
-        raise PdfError(f"Could not open PDF: {exc}") from exc
-
-    with doc:
-        if doc.needs_pass:
-            raise PdfError("This PDF is password-protected.")
-        if not doc.is_pdf:
-            raise PdfError("This file is not a PDF.")
+    with _open(path) as doc:
         raw = [_read_blocks(page) for page in doc]
 
     return [Page(number=i + 1, text=text) for i, text in enumerate(clean_pages(raw))]

@@ -27,7 +27,7 @@ def main() -> int:
     window.show()
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if args:
-        window.open_pdf(Path(args[0]))
+        window.open_file(Path(args[0]))
     return app.exec()
 
 

@@ -9,15 +9,15 @@ import numpy as np
 import pytest
 
 from readaloud.export import (
-    PAGE_GAP_SECONDS,
+    SECTION_GAP_SECONDS,
     ExportCancelled,
     ExportError,
-    export_pages,
+    export_sections,
     find_ffmpeg,
     output_format,
-    resolve_page_range,
+    resolve_section_range,
 )
-from readaloud.pdf_extract import Page
+from readaloud.document import Section
 from readaloud.tts import SAMPLE_RATE
 
 
@@ -34,42 +34,42 @@ class FakeEngine:
 
 
 PAGES = [
-    Page(1, "Page one. Has two sentences."),
-    Page(2, "Page two."),
-    Page(3, ""),  # scanned / no text
-    Page(4, "Page four."),
+    Section.from_text(1, "Page 1", "Page one. Has two sentences."),
+    Section.from_text(2, "Page 2", "Page two."),
+    Section.from_text(3, "Page 3", ""),  # scanned / no text
+    Section.from_text(4, "Page 4", "Page four."),
 ]
 
 
-# ----- resolve_page_range ---------------------------------------------------
+# ----- resolve_section_range ---------------------------------------------------
 
 
 def test_whole_document_by_default() -> None:
-    assert resolve_page_range(None, None, 4) == [1, 2, 3, 4]
+    assert resolve_section_range(None, None, 4) == [1, 2, 3, 4]
 
 
 def test_explicit_range_is_inclusive() -> None:
-    assert resolve_page_range(1, 3, 10) == [1, 2, 3]
+    assert resolve_section_range(1, 3, 10) == [1, 2, 3]
 
 
 def test_single_page_range() -> None:
-    assert resolve_page_range(5, 5, 10) == [5]
+    assert resolve_section_range(5, 5, 10) == [5]
 
 
 def test_open_ended_ranges() -> None:
-    assert resolve_page_range(8, None, 10) == [8, 9, 10]
-    assert resolve_page_range(None, 2, 10) == [1, 2]
+    assert resolve_section_range(8, None, 10) == [8, 9, 10]
+    assert resolve_section_range(None, 2, 10) == [1, 2]
 
 
 @pytest.mark.parametrize("start,end", [(0, 3), (1, 11), (4, 2), (-1, 2), (11, None)])
 def test_invalid_ranges_raise(start: int | None, end: int | None) -> None:
     with pytest.raises(ValueError):
-        resolve_page_range(start, end, 10)
+        resolve_section_range(start, end, 10)
 
 
 def test_empty_document_raises() -> None:
     with pytest.raises(ValueError):
-        resolve_page_range(None, None, 0)
+        resolve_section_range(None, None, 0)
 
 
 # ----- output_format --------------------------------------------------------
@@ -94,18 +94,18 @@ def test_export_wav_range_skips_empty_pages(tmp_path: Path) -> None:
     progress: list[tuple[int, int]] = []
     out = tmp_path / "out.wav"
 
-    result = export_pages(
+    result = export_sections(
         PAGES, [2, 3, 4], out, engine, progress=lambda d, t: progress.append((d, t))
     )
 
     assert engine.calls == ["Page two.", "Page four."]
-    assert result.exported_pages == [2, 4]
-    assert result.skipped_pages == [3]
+    assert result.exported_sections == [2, 4]
+    assert result.skipped_sections == [3]
     assert progress == [(1, 2), (2, 2)]
     with wave.open(str(out)) as wav:
         assert wav.getframerate() == SAMPLE_RATE
         assert wav.getnchannels() == 1
-        expected = 2 * int(0.1 * SAMPLE_RATE) + int(PAGE_GAP_SECONDS * SAMPLE_RATE)
+        expected = 2 * int(0.1 * SAMPLE_RATE) + int(SECTION_GAP_SECONDS * SAMPLE_RATE)
         assert wav.getnframes() == expected
     assert result.duration_seconds == pytest.approx(expected / SAMPLE_RATE)
 
@@ -114,13 +114,13 @@ def test_export_cancel_removes_partial_file(tmp_path: Path) -> None:
     out = tmp_path / "out.wav"
     engine = FakeEngine()
     with pytest.raises(ExportCancelled):
-        export_pages(PAGES, [1, 2], out, engine, is_cancelled=lambda: len(engine.calls) >= 1)
+        export_sections(PAGES, [1, 2], out, engine, is_cancelled=lambda: len(engine.calls) >= 1)
     assert not out.exists()
 
 
 def test_export_only_empty_pages_raises(tmp_path: Path) -> None:
     with pytest.raises(ExportError):
-        export_pages(PAGES, [3], tmp_path / "out.wav", FakeEngine())
+        export_sections(PAGES, [3], tmp_path / "out.wav", FakeEngine())
 
 
 def test_find_ffmpeg_without_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -132,6 +132,6 @@ def test_find_ffmpeg_without_path(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.skipif(find_ffmpeg() is None, reason="ffmpeg not installed")
 def test_export_mp3(tmp_path: Path) -> None:
     out = tmp_path / "out.mp3"
-    result = export_pages(PAGES, [1, 2], out, FakeEngine())
+    result = export_sections(PAGES, [1, 2], out, FakeEngine())
     assert out.stat().st_size > 0
     assert result.duration_seconds > 0

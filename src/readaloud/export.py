@@ -1,4 +1,4 @@
-"""Export PDF pages to a single MP3 or WAV file.
+"""Export document sections (PDF pages or EPUB chapters) to a single MP3 or WAV file.
 
 Audio is streamed into a WAV file segment by segment, so memory use stays flat
 while synthesizing. For MP3 output that WAV is a temporary file that pydub
@@ -17,12 +17,12 @@ from typing import Callable, Protocol, Sequence
 
 import numpy as np
 
-from readaloud.pdf_extract import Page
-from readaloud.tts import SAMPLE_RATE, split_into_segments, to_pcm16
+from readaloud.document import Section
+from readaloud.tts import SAMPLE_RATE, to_pcm16
 
 SUPPORTED_FORMATS = ("mp3", "wav")
 MP3_BITRATE = "96k"
-PAGE_GAP_SECONDS = 0.8
+SECTION_GAP_SECONDS = 0.8
 # Apps launched from the macOS Finder don't inherit the shell PATH, so also
 # look where Homebrew and common installers put ffmpeg.
 FFMPEG_FALLBACK_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
@@ -51,8 +51,8 @@ class ExportResult:
 
     path: Path
     duration_seconds: float
-    exported_pages: list[int] = field(default_factory=list)
-    skipped_pages: list[int] = field(default_factory=list)
+    exported_sections: list[int] = field(default_factory=list)
+    skipped_sections: list[int] = field(default_factory=list)
 
 
 def find_ffmpeg() -> str | None:
@@ -67,20 +67,20 @@ def find_ffmpeg() -> str | None:
     return None
 
 
-def resolve_page_range(start: int | None, end: int | None, page_count: int) -> list[int]:
-    """Return the 1-based page numbers from ``start`` to ``end`` inclusive.
+def resolve_section_range(start: int | None, end: int | None, count: int) -> list[int]:
+    """Return the 1-based section numbers from ``start`` to ``end`` inclusive.
 
-    ``None`` means the first or last page. Raises ``ValueError`` for an empty
-    document or a range outside ``1..page_count`` or with ``start > end``.
+    ``None`` means the first or last section. Raises ``ValueError`` for an empty
+    document or a range outside ``1..count`` or with ``start > end``.
     """
-    if page_count < 1:
-        raise ValueError("The document has no pages.")
+    if count < 1:
+        raise ValueError("The document has nothing to export.")
     first = 1 if start is None else start
-    last = page_count if end is None else end
-    if not (1 <= first <= page_count and 1 <= last <= page_count):
-        raise ValueError(f"Pages must be between 1 and {page_count}.")
+    last = count if end is None else end
+    if not (1 <= first <= count and 1 <= last <= count):
+        raise ValueError(f"The range must be between 1 and {count}.")
     if first > last:
-        raise ValueError("The first page must not be after the last page.")
+        raise ValueError("The start of the range must not be after its end.")
     return list(range(first, last + 1))
 
 
@@ -92,18 +92,18 @@ def output_format(path: str | Path) -> str:
     return suffix
 
 
-def export_pages(
-    pages: Sequence[Page],
-    page_numbers: Sequence[int],
+def export_sections(
+    sections: Sequence[Section],
+    numbers: Sequence[int],
     out_path: str | Path,
     engine: Synthesizer,
     speed: float = 1.0,
     progress: ProgressCallback | None = None,
     is_cancelled: CancelCheck | None = None,
 ) -> ExportResult:
-    """Synthesize the given pages into one audio file at ``out_path``.
+    """Synthesize the sections with the given 1-based ``numbers`` into one audio file.
 
-    Pages without text are skipped and reported in the result. ``progress`` is
+    Sections without text are skipped and reported in the result. ``progress`` is
     called with (segments done, total segments). If ``is_cancelled`` returns
     True the export stops, partial output is removed and ``ExportCancelled``
     is raised.
@@ -114,12 +114,12 @@ def export_pages(
     if fmt == "mp3" and ffmpeg is None:
         raise ExportError("MP3 export needs ffmpeg. Install it, or export to WAV instead.")
 
-    selected = [pages[n - 1] for n in page_numbers]
-    readable = [p for p in selected if p.has_text]
+    selected = [sections[n - 1] for n in numbers]
+    readable = [s for s in selected if s.has_text]
     if not readable:
-        raise ExportError("None of the selected pages contain extractable text.")
-    plan = [(page, split_into_segments(page.text)) for page in readable]
-    total = sum(len(segments) for _, segments in plan)
+        raise ExportError("None of the selected sections contain readable text.")
+    plan = [list(section.sentences) for section in readable]
+    total = sum(len(segments) for segments in plan)
 
     with tempfile.TemporaryDirectory(prefix="readaloud-") as tmp:
         wav_path = out_path if fmt == "wav" else Path(tmp) / "export.wav"
@@ -134,13 +134,13 @@ def export_pages(
     return ExportResult(
         path=out_path,
         duration_seconds=frames / SAMPLE_RATE,
-        exported_pages=[p.number for p in readable],
-        skipped_pages=[p.number for p in selected if not p.has_text],
+        exported_sections=[s.number for s in readable],
+        skipped_sections=[s.number for s in selected if not s.has_text],
     )
 
 
 def _write_wav(
-    plan: list[tuple[Page, list[str]]],
+    plan: list[list[str]],
     wav_path: Path,
     engine: Synthesizer,
     speed: float,
@@ -149,15 +149,15 @@ def _write_wav(
     is_cancelled: CancelCheck | None,
 ) -> int:
     """Stream synthesized audio into a 16-bit mono WAV file; return the frame count."""
-    gap = b"\x00\x00" * int(PAGE_GAP_SECONDS * SAMPLE_RATE)
+    gap = b"\x00\x00" * int(SECTION_GAP_SECONDS * SAMPLE_RATE)
     done = 0
     frames = 0
     with wave.open(str(wav_path), "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(SAMPLE_RATE)
-        for page_index, (_page, segments) in enumerate(plan):
-            if page_index:
+        for section_index, segments in enumerate(plan):
+            if section_index:
                 wav.writeframes(gap)
                 frames += len(gap) // 2
             for segment in segments:

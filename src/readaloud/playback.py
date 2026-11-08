@@ -1,8 +1,8 @@
 """Audio playback of PDF pages.
 
 ``Reader`` is the document-level controller the GUI talks to: it tracks the
-current page, skips pages without text and moves to the next page when one
-finishes. ``SegmentPlayer`` plays one page's sentence segments through
+current section (PDF page or EPUB chapter), skips sections without text and
+moves to the next one when a section finishes. ``SegmentPlayer`` plays one page's sentence segments through
 ``QAudioSink`` while a background thread synthesizes the next segment, so
 there is no gap and the UI never blocks on the TTS model.
 """
@@ -15,8 +15,8 @@ import logging
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QThread, Signal, Slot
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QtAudio
 
-from readaloud.pdf_extract import Page
-from readaloud.tts import SAMPLE_RATE, KokoroEngine, TtsError, clamp_speed, split_into_segments, to_pcm16
+from readaloud.document import Document, Section
+from readaloud.tts import SAMPLE_RATE, KokoroEngine, TtsError, clamp_speed, to_pcm16
 
 log = logging.getLogger(__name__)
 
@@ -243,11 +243,14 @@ class SegmentPlayer(QObject):
 
 
 class Reader(QObject):
-    """Document-level playback: current page, page skipping and auto-advance."""
+    """Document-level playback: current section, skipping empty sections and auto-advance.
 
-    page_changed = Signal(int)  # 1-based page number
-    segment_started = Signal(int, int)  # page number, segment index
-    page_skipped = Signal(int)  # page number with no extractable text
+    Works on any ``Document``; a section is a PDF page or an EPUB chapter.
+    """
+
+    section_changed = Signal(int)  # 1-based section number
+    segment_started = Signal(int, int)  # section number, sentence index
+    section_skipped = Signal(int)  # section number with no readable text
     state_changed = Signal(PlayerState)
     finished = Signal()
     engine_ready = Signal()
@@ -255,29 +258,28 @@ class Reader(QObject):
 
     def __init__(self, engine: KokoroEngine, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._pages: list[Page] = []
-        self._segments: dict[int, list[str]] = {}
+        self._document: Document | None = None
         self._current = 1
         self._player = SegmentPlayer(engine, self)
         self._player.segment_started.connect(lambda i: self.segment_started.emit(self._current, i))
-        self._player.finished.connect(self._on_page_finished)
+        self._player.finished.connect(self._on_section_finished)
         self._player.state_changed.connect(self.state_changed)
         self._player.engine_ready.connect(self.engine_ready)
         self._player.error.connect(self.error)
 
     @property
-    def pages(self) -> list[Page]:
-        """All pages of the open document."""
-        return list(self._pages)
+    def document(self) -> Document | None:
+        """The open document, or None."""
+        return self._document
 
     @property
-    def page_count(self) -> int:
-        """Number of pages in the open document (0 if none)."""
-        return len(self._pages)
+    def section_count(self) -> int:
+        """Number of sections in the open document (0 if none)."""
+        return self._document.section_count if self._document else 0
 
     @property
-    def current_page(self) -> int:
-        """1-based number of the current page."""
+    def current_section(self) -> int:
+        """1-based number of the current section."""
         return self._current
 
     @property
@@ -285,41 +287,37 @@ class Reader(QObject):
         """Current playback state."""
         return self._player.state
 
-    def page(self, number: int) -> Page:
-        """Return the page with the given 1-based number."""
-        return self._pages[number - 1]
+    def section(self, number: int) -> Section:
+        """Return the section with the given 1-based number."""
+        if self._document is None:
+            raise IndexError("No document is open")
+        return self._document.section(number)
 
-    def segments(self, number: int) -> list[str]:
-        """Sentence segments of a page, computed once and cached."""
-        if number not in self._segments:
-            self._segments[number] = split_into_segments(self.page(number).text)
-        return self._segments[number]
-
-    def set_pages(self, pages: list[Page], start_page: int = 1) -> None:
-        """Load a new document and show ``start_page`` without playing."""
+    def set_document(self, document: Document, start_section: int = 1) -> None:
+        """Load a new document and show ``start_section`` without playing."""
         self._player.stop()
-        self._pages = list(pages)
-        self._segments.clear()
-        self.go_to_page(start_page)
+        self._document = document
+        self._current = 1
+        self.go_to_section(start_section)
 
-    def go_to_page(self, number: int) -> None:
-        """Make ``number`` the current page. Keeps playing if playback was active."""
-        if not self._pages:
+    def go_to_section(self, number: int) -> None:
+        """Make ``number`` the current section. Keeps playing if playback was active."""
+        if not self.section_count:
             return
-        number = max(1, min(number, self.page_count))
+        number = max(1, min(number, self.section_count))
         direction = 1 if number >= self._current else -1
         was_active = self._player.state is not PlayerState.STOPPED
         self._player.stop()
         self._current = number
-        self.page_changed.emit(number)
+        self.section_changed.emit(number)
         if was_active:
             self._play_current(direction)
 
     def play(self) -> None:
-        """Play from the start of the current page, or resume if paused."""
+        """Play from the start of the current section, or resume if paused."""
         if self._player.state is PlayerState.PAUSED:
             self._player.resume()
-        elif self._player.state is PlayerState.STOPPED and self._pages:
+        elif self._player.state is PlayerState.STOPPED and self.section_count:
             self._play_current(direction=1)
 
     def pause(self) -> None:
@@ -327,7 +325,7 @@ class Reader(QObject):
         self._player.pause()
 
     def stop(self) -> None:
-        """Stop playback; the current page stays selected."""
+        """Stop playback; the current section stays selected."""
         self._player.stop()
 
     def set_speed(self, speed: float) -> None:
@@ -339,23 +337,23 @@ class Reader(QObject):
         self._player.shutdown()
 
     def _play_current(self, direction: int) -> None:
-        """Play the current page, skipping pages without text in ``direction``."""
-        while not self.page(self._current).has_text:
-            self.page_skipped.emit(self._current)
+        """Play the current section, skipping sections without text in ``direction``."""
+        while not self.section(self._current).has_text:
+            self.section_skipped.emit(self._current)
             nxt = self._current + direction
-            if not 1 <= nxt <= self.page_count:
+            if not 1 <= nxt <= self.section_count:
                 self._player.stop()
                 self.finished.emit()
                 return
             self._current = nxt
-            self.page_changed.emit(nxt)
-        self._player.play(self.segments(self._current))
+            self.section_changed.emit(nxt)
+        self._player.play(list(self.section(self._current).sentences))
 
     @Slot()
-    def _on_page_finished(self) -> None:
-        if self._current >= self.page_count:
+    def _on_section_finished(self) -> None:
+        if self._current >= self.section_count:
             self.finished.emit()
             return
         self._current += 1
-        self.page_changed.emit(self._current)
+        self.section_changed.emit(self._current)
         self._play_current(direction=1)

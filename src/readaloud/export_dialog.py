@@ -1,4 +1,4 @@
-"""Export dialog and the background worker that runs ``export.export_pages``."""
+"""Export dialog and the background worker that runs ``export.export_sections``."""
 
 from __future__ import annotations
 
@@ -17,20 +17,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from readaloud.export import ExportCancelled, ExportError, Synthesizer, export_pages
-from readaloud.pdf_extract import Page
+from readaloud.document import Section
+from readaloud.export import ExportCancelled, ExportError, Synthesizer, export_sections
 from readaloud.tts import TtsError
 
 
-class PageRangeDialog(QDialog):
-    """Lets the user choose the whole document or a page range."""
+class RangeDialog(QDialog):
+    """Lets the user choose the whole document or a range of sections.
 
-    def __init__(self, page_count: int, current_page: int, parent: QWidget | None = None) -> None:
+    ``unit`` is the section name shown to the user, e.g. "Page" or "Chapter".
+    """
+
+    def __init__(self, unit: str, count: int, current: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export audio")
 
-        self.all_radio = QRadioButton(f"All pages (1–{page_count})", self)
-        self.range_radio = QRadioButton("Pages", self)
+        plural = f"{unit.lower()}s"
+        self.all_radio = QRadioButton(f"All {plural} (1–{count})", self)
+        self.range_radio = QRadioButton(plural.capitalize(), self)
         group = QButtonGroup(self)
         group.addButton(self.all_radio)
         group.addButton(self.range_radio)
@@ -39,10 +43,10 @@ class PageRangeDialog(QDialog):
         self.start_spin = QSpinBox(self)
         self.end_spin = QSpinBox(self)
         for spin in (self.start_spin, self.end_spin):
-            spin.setRange(1, page_count)
+            spin.setRange(1, count)
             spin.setEnabled(False)
-        self.start_spin.setValue(current_page)
-        self.end_spin.setValue(page_count)
+        self.start_spin.setValue(current)
+        self.end_spin.setValue(count)
         self.start_spin.valueChanged.connect(lambda v: self.end_spin.setMinimum(v))
         self.range_radio.toggled.connect(self.start_spin.setEnabled)
         self.range_radio.toggled.connect(self.end_spin.setEnabled)
@@ -79,14 +83,14 @@ class ExportWorker(QObject):
 
     def __init__(
         self,
-        pages: Sequence[Page],
-        page_numbers: Sequence[int],
+        sections: Sequence[Section],
+        numbers: Sequence[int],
         out_path: Path,
         engine: Synthesizer,
         speed: float,
     ) -> None:
         super().__init__()
-        self._args = (list(pages), list(page_numbers), out_path, engine, speed)
+        self._args = (list(sections), list(numbers), out_path, engine, speed)
         self._cancel = False
 
     def cancel(self) -> None:
@@ -96,10 +100,10 @@ class ExportWorker(QObject):
     @Slot()
     def run(self) -> None:
         """Do the export; emits exactly one of finished, failed or cancelled."""
-        pages, numbers, out_path, engine, speed = self._args
+        sections, numbers, out_path, engine, speed = self._args
         try:
-            result = export_pages(
-                pages,
+            result = export_sections(
+                sections,
                 numbers,
                 out_path,
                 engine,

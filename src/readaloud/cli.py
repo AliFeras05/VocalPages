@@ -1,4 +1,4 @@
-"""Command-line entry point: synthesize a single PDF page to a WAV file."""
+"""Command-line entry point: synthesize one page or chapter to a WAV file."""
 
 from __future__ import annotations
 
@@ -9,18 +9,21 @@ from pathlib import Path
 
 import numpy as np
 
-from readaloud.pdf_extract import PdfError, extract_pages
-from readaloud.tts import SAMPLE_RATE, KokoroEngine, TtsError, split_into_segments, to_pcm16
+from readaloud.document import DocumentError, load_document
+from readaloud.tts import SAMPLE_RATE, KokoroEngine, TtsError, to_pcm16
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Return the argument parser for ``readaloud-cli``."""
     parser = argparse.ArgumentParser(
-        prog="readaloud-cli", description="Read one PDF page aloud into a WAV file."
+        prog="readaloud-cli", description="Read one page (PDF) or chapter (EPUB) aloud into a WAV file."
     )
-    parser.add_argument("pdf", type=Path, help="PDF file to read")
-    parser.add_argument("--page", type=int, default=1, help="1-based page number (default: 1)")
-    parser.add_argument("--out", type=Path, default=Path("page.wav"), help="output WAV file")
+    parser.add_argument("file", type=Path, help="document to read")
+    parser.add_argument(
+        "--section", "--page", "--chapter", dest="section", type=int, default=1,
+        help="1-based page or chapter number (default: 1)",
+    )
+    parser.add_argument("--out", type=Path, default=Path("section.wav"), help="output WAV file")
     parser.add_argument("--speed", type=float, default=1.0, help="speaking speed, 0.5 to 2.0")
     return parser
 
@@ -29,24 +32,24 @@ def main(argv: list[str] | None = None) -> int:
     """Run the CLI and return a process exit code."""
     args = build_parser().parse_args(argv)
     try:
-        pages = extract_pages(args.pdf)
-    except PdfError as exc:
+        document = load_document(args.file)
+    except DocumentError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if not 1 <= args.page <= len(pages):
-        print(f"error: page must be between 1 and {len(pages)}", file=sys.stderr)
+    unit = document.unit.lower()
+    if not 1 <= args.section <= document.section_count:
+        print(f"error: {unit} must be between 1 and {document.section_count}", file=sys.stderr)
         return 2
-    page = pages[args.page - 1]
-    if not page.has_text:
-        print(f"Page {page.number} has no extractable text (it may be a scanned image).")
+    section = document.section(args.section)
+    if not section.has_text:
+        print(f"{document.unit} {section.number} has no readable text (it may be a scanned image).")
         return 1
 
     engine = KokoroEngine()
-    segments = split_into_segments(page.text)
-    print(f"Synthesizing page {page.number} ({len(segments)} segments)...")
+    print(f"Synthesizing {unit} {section.number} ({len(section.sentences)} sentences)...")
     try:
-        audio = np.concatenate([engine.synthesize(s, args.speed) for s in segments])
+        audio = np.concatenate([engine.synthesize(s, args.speed) for s in section.sentences])
     except TtsError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
