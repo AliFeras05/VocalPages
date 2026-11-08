@@ -33,8 +33,11 @@ Thumbs.db
 *.mp3
 *.wav
 
-# --- App saved state (normally stored in the user data dir, never in the repo) ---
+# --- App library and saved state (stored in the user data dir, never in the repo) ---
 resume_positions.json
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
 
 # --- User books (tests generate their own fixture PDFs/EPUBs at runtime) ---
 *.pdf
