@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -13,7 +14,10 @@ from readaloud import APP_NAME
 
 def main() -> int:
     """Start the Qt application and return its exit code."""
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    level = os.environ.get("READALOUD_LOG_LEVEL", "WARNING").upper()
+    logging.basicConfig(
+        level=getattr(logging, level, logging.WARNING), format="%(levelname)s %(name)s: %(message)s"
+    )
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
 

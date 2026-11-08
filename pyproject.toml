@@ -27,6 +27,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+app = ["pyinstaller>=6"]
 
 [project.scripts]
 readaloud = "readaloud.__main__:main"

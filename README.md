@@ -60,7 +60,9 @@ readaloud                 # or: python -m readaloud
 readaloud path/to/book.pdf
 ```
 
-The first launch takes a little longer while the voice model loads; the status bar says when it is ready.
+The window opens on a start screen: drag a PDF onto it or click **Choose a PDF…**. The first launch takes a little longer while the voice model loads; the status bar says when it is ready.
+
+Set `READALOUD_LOG_LEVEL=INFO` (or `DEBUG`) to see diagnostic logging in the terminal.
 
 | Control | Shortcut |
 | --- | --- |
@@ -70,6 +72,20 @@ The first launch takes a little longer while the voice model loads; the status b
 | Export audio | Ctrl/Cmd+E |
 
 Speed changes take effect from the next sentence.
+
+### Build a double-click app (macOS)
+
+To launch Readaloud from Finder, the Dock or Launchpad with no terminal, build a standalone `Readaloud.app` with PyInstaller:
+
+```bash
+python -m pip install -e ".[app]"
+python -m spacy download en_core_web_sm   # bundled so the app never needs pip
+pyinstaller --noconfirm packaging/readaloud.spec
+```
+
+The app appears at `dist/Readaloud.app` (about 1 GB, mostly PyTorch). Drag it into your Applications folder, then open it and drop a PDF onto the window. The voice model is still downloaded on first launch and cached in your user folder. MP3 export uses the system `ffmpeg` (Homebrew's is found automatically).
+
+The same spec builds a `dist/Readaloud/` folder app on Windows and Linux. That build is untested.
 
 ### Command line
 
@@ -102,6 +118,8 @@ readaloud/
 │   ├── state.py          # per-PDF resume positions
 │   └── gui.py            # main window (widgets and wiring only)
 ├── tests/                # pytest suite; generates its own PDFs
+├── packaging/            # PyInstaller spec and launcher for Readaloud.app
+├── docs/                 # screenshot
 ├── pyproject.toml
 ├── LICENSE
 └── README.md

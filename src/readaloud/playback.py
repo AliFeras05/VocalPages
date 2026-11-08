@@ -43,12 +43,14 @@ class _SynthWorker(QObject):
 
     @Slot()
     def warm_up(self) -> None:
-        """Load the model up front so the first Play is quick."""
+        """Load the model and run one tiny synthesis so the first Play is quick."""
         try:
             self._engine.load()
+            self._engine.synthesize("Ready.")
         except TtsError as exc:
             self.failed.emit(str(exc))
             return
+        log.info("Voice model ready")
         self.ready.emit()
 
     @Slot(int, int, str, float)
