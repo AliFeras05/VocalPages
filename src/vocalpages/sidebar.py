@@ -151,9 +151,10 @@ class LibrarySidebar(QWidget):
         self.footer = QWidget(self)
         self.footer.setObjectName("sidebarFooter")
         self.footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.footer.setFixedHeight(theme.BOTTOM_BAR_HEIGHT)
         self.footer_layout = QHBoxLayout(self.footer)
-        self.footer_layout.setContentsMargins(theme.space(2), theme.space(1), theme.space(2), theme.space(1))
-        self.footer_layout.addStretch()
+        self.footer_layout.setContentsMargins(theme.space(2), theme.space(1), theme.space(1.5), theme.space(1))
+        self.footer_layout.setSpacing(theme.space(1))
 
         body = QVBoxLayout()
         body.setContentsMargins(theme.space(2), theme.space(2), theme.space(1), theme.space(1))
@@ -170,9 +171,9 @@ class LibrarySidebar(QWidget):
         self._rows: dict[str, BookRow] = {}
         self._current: str | None = None
 
-    def add_footer_widget(self, widget: QWidget) -> None:
-        """Place a widget (e.g. the theme toggle) at the bottom of the sidebar."""
-        self.footer_layout.addWidget(widget)
+    def add_footer_widget(self, widget: QWidget, stretch: int = 0) -> None:
+        """Place a widget (status text, theme toggle) in the sidebar footer, left to right."""
+        self.footer_layout.addWidget(widget, stretch)
 
     def set_books(self, books: list[BookRecord], current_id: str | None = None) -> None:
         """Replace the list with ``books`` and mark ``current_id`` as the open book."""

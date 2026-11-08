@@ -140,6 +140,7 @@ BUTTON_SIZE = 40  # square icon buttons
 PLAY_BUTTON_SIZE = 56
 SIDEBAR_WIDTH = 272
 PROGRESS_BAR_HEIGHT = 3
+BOTTOM_BAR_HEIGHT = 80  # player bar and sidebar footer share one baseline
 
 
 # ----- contrast (WCAG 2.x) ----------------------------------------------------
@@ -214,12 +215,7 @@ QToolTip {{
     padding: {space(0.5)}px {space(1)}px;
     font-size: {FONT_SIZE_SMALL}px;
 }}
-QStatusBar {{
-    background: {p.background};
-    color: {p.text_muted};
-    font-size: {FONT_SIZE_SMALL}px;
-}}
-QStatusBar::item {{ border: none; }}
+QLabel#statusText {{ color: {p.text_muted}; font-size: {FONT_SIZE_SMALL}px; background: transparent; }}
 QSplitter::handle {{ background: {p.separator}; width: 1px; }}
 
 /* ----- icon buttons ----- */

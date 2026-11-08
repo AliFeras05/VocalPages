@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, Slot
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, QTimer, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -85,7 +85,7 @@ class MainWindow(QMainWindow):
         self.apply_theme(initial_theme(self._settings.theme, system_prefers_dark()))
         self._refresh_sidebar()
         self.show_home()
-        self.statusBar().showMessage("Loading voice model…")
+        self.show_status("Loading voice model…")
 
     # ----- construction -------------------------------------------------
 
@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         bar = QFrame(parent)
         bar.setObjectName("playerBar")
         bar.setAccessibleName("Player controls")
+        bar.setFixedHeight(theme.BOTTOM_BAR_HEIGHT)
 
         self.play_button = self._action_button(self.play_action, "playButton")
         self.icons.bind(self.play_action, "play", role="on_accent", size=theme.ICON_LARGE)
@@ -228,7 +229,7 @@ class MainWindow(QMainWindow):
         speed.addWidget(self.speed_value)
 
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(theme.space(3), theme.space(1.5), theme.space(3), theme.space(1.5))
+        layout.setContentsMargins(theme.space(3), 0, theme.space(3), 0)
         layout.setSpacing(theme.space(3))
         layout.addLayout(controls)
         layout.addLayout(progress, 1)
@@ -251,6 +252,15 @@ class MainWindow(QMainWindow):
         self.sidebar.book_selected.connect(self.open_book)
         self.sidebar.remove_requested.connect(self._confirm_remove)
 
+        self.status_label = QLabel(self)
+        self.status_label.setObjectName("statusText")
+        self.status_label.setWordWrap(True)
+        self.status_label.setAccessibleName("Status")
+        self.sidebar.add_footer_widget(self.status_label, stretch=1)
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.timeout.connect(lambda: self.status_label.clear())
+
         self.theme_button = QToolButton(self)
         self.theme_button.setObjectName("themeButton")
         self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -272,8 +282,8 @@ class MainWindow(QMainWindow):
         self._reader.position_changed.connect(self._save_position)
         self._reader.section_skipped.connect(self._on_section_skipped)
         self._reader.state_changed.connect(lambda _state: self._update_controls())
-        self._reader.finished.connect(lambda: self.statusBar().showMessage("Finished reading.", 5000))
-        self._reader.engine_ready.connect(lambda: self.statusBar().showMessage("Voice model ready.", 3000))
+        self._reader.finished.connect(lambda: self.show_status("Finished reading.", 5000))
+        self._reader.engine_ready.connect(lambda: self.show_status("Voice model ready.", 3000))
         self._reader.error.connect(self._show_error)
 
     # ----- actions ------------------------------------------------------
@@ -327,6 +337,13 @@ class MainWindow(QMainWindow):
             return
         self._show_document(record, document)
 
+    def show_status(self, message: str, timeout_ms: int = 0) -> None:
+        """Show a short status message in the sidebar footer (cleared after ``timeout_ms``)."""
+        self.status_label.setText(message)
+        self._status_timer.stop()
+        if message and timeout_ms:
+            self._status_timer.start(timeout_ms)
+
     @property
     def theme_name(self) -> str:
         """The active theme, "light" or "dark"."""
@@ -359,9 +376,10 @@ class MainWindow(QMainWindow):
         """Stop reading and show the home page."""
         self._reader.stop()
         self.stack.setCurrentIndex(0)
+        self.sidebar.list.setFocus()
         self.sidebar.select(None)
         self.setWindowTitle(APP_NAME)
-        self.statusBar().clearMessage()
+        self.show_status("")
 
     def _show_document(self, record: BookRecord, document: Document) -> None:
         if not document.section_count:
@@ -383,9 +401,10 @@ class MainWindow(QMainWindow):
         self._reader.set_document(document, start_section=record.section, start_sentence=record.sentence)
         self._book = record
         self._refresh_sidebar()
+        self.text_view.setFocus()
         empty = sum(1 for section in document.sections if not section.has_text)
         if empty:
-            self.statusBar().showMessage(
+            self.show_status(
                 f"{empty} {document.unit.lower()}(s) have no readable text (scanned?) and will be skipped.",
                 8000,
             )
@@ -511,7 +530,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_export_cancelled(self) -> None:
         self._end_export()
-        self.statusBar().showMessage("Export cancelled.", 5000)
+        self.show_status("Export cancelled.", 5000)
 
     def _end_export(self) -> None:
         if self._export_progress is not None:
@@ -568,7 +587,7 @@ class MainWindow(QMainWindow):
     @Slot(int)
     def _on_section_skipped(self, number: int) -> None:
         unit = self._reader.document.unit if self._reader.document else "Page"
-        self.statusBar().showMessage(
+        self.show_status(
             f"{unit} {number} has no readable text (it may be a scanned image). Skipped.", 6000
         )
 
