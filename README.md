@@ -1,5 +1,7 @@
 # VocalPages
 
+[![Tests](https://github.com/AliFeras05/VocalPages/actions/workflows/tests.yml/badge.svg)](https://github.com/AliFeras05/VocalPages/actions/workflows/tests.yml)
+
 A desktop app that reads PDF and EPUB books aloud like an audiobook, using a local, offline text-to-speech engine.
 
 | | Light | Dark |
@@ -30,41 +32,30 @@ A desktop app that reads PDF and EPUB books aloud like an audiobook, using a loc
 | PDF (`.pdf`) | Page | Needs a text layer; scanned pages are skipped. Password-protected PDFs are not supported. |
 | EPUB (`.epub`, EPUB 2 and 3) | Chapter (one per spine document) | DRM-protected EPUBs are detected and rejected with a message. Embedded-font obfuscation is fine. |
 
-## Requirements
-
-- **Python 3.11 or 3.12.** Kokoro 0.9 does not support Python 3.13 yet.
-- **ffmpeg**, needed by pydub for MP3 export. WAV export works without it.
-- About 2 GB of disk space for PyTorch and the voice model.
-- An internet connection **on first run only**: Kokoro downloads its voice model (about 330 MB) from Hugging Face, and its phonemizer downloads the small spaCy English model. After that everything runs offline.
-
 ## Installation
 
-### 1. Install Python 3.12 and ffmpeg
-
-macOS (Homebrew):
-
-```bash
-brew install python@3.12 ffmpeg
-```
-
-Ubuntu / Debian:
-
-```bash
-sudo apt install python3.12 python3.12-venv ffmpeg
-```
-
-Windows: install Python 3.12 from [python.org](https://www.python.org/downloads/) and ffmpeg from [ffmpeg.org](https://ffmpeg.org/download.html), then make sure `ffmpeg` is on your `PATH`.
-
-### 2. Create a virtual environment and install VocalPages
+You need **Python 3.11 or 3.12** (the voice engine doesn't support 3.13 yet) and, for MP3 export, **ffmpeg**.
 
 ```bash
 git clone https://github.com/AliFeras05/VocalPages.git
-cd vocalpages
+cd VocalPages
 python3.12 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install .
+vocalpages
 ```
+
+The first launch downloads the voice model (about 330 MB) once. After that, everything runs offline.
+
+<details>
+<summary>Don't have Python 3.12 or ffmpeg?</summary>
+
+- **macOS:** `brew install python@3.12 ffmpeg`
+- **Ubuntu/Debian:** `sudo apt install python3.12 python3.12-venv ffmpeg`
+- **Windows:** install Python 3.12 from [python.org](https://www.python.org/downloads/) and ffmpeg from [ffmpeg.org](https://ffmpeg.org/download.html), and add `ffmpeg` to your `PATH`.
+
+The install needs about 2 GB of disk space, mostly for PyTorch.
+</details>
 
 ## Usage
 
@@ -116,6 +107,7 @@ vocalpages-cli path/to/book.epub --chapter 2 --out chapter2.wav
 ### Run the tests
 
 ```bash
+pip install -e ".[dev]"
 pytest
 ```
 
