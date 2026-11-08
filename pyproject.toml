@@ -41,4 +41,7 @@ addopts = "-ra"
 filterwarnings = [
     # Emitted by PyMuPDF's SWIG bindings on import; not actionable here.
     "ignore:builtin type .* has no __module__ attribute:DeprecationWarning",
+    # pydub 0.25 source uses invalid regex escapes; harmless.
+    "ignore:invalid escape sequence:SyntaxWarning",
+    "ignore:'audioop' is deprecated:DeprecationWarning",
 ]

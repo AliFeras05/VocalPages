@@ -127,6 +127,32 @@ def _quiet_third_party() -> Iterator[None]:
         yield
 
 
+class FairLock:
+    """A first-come, first-served lock.
+
+    ``threading.Lock`` lets a thread that releases and immediately re-acquires
+    win again, so a long export would starve live playback. Tickets make
+    waiters take turns.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._next_ticket = 0
+        self._serving = 0
+
+    def __enter__(self) -> "FairLock":
+        with self._cond:
+            ticket = self._next_ticket
+            self._next_ticket += 1
+            self._cond.wait_for(lambda: self._serving == ticket)
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        with self._cond:
+            self._serving += 1
+            self._cond.notify_all()
+
+
 class KokoroEngine:
     """Thin, thread-safe wrapper around a Kokoro ``KPipeline``."""
 
@@ -134,7 +160,7 @@ class KokoroEngine:
         self.voice = voice
         self.lang_code = lang_code
         self._pipeline = None
-        self._lock = threading.Lock()
+        self._lock = FairLock()
 
     @property
     def is_loaded(self) -> bool:

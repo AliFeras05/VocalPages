@@ -264,6 +264,11 @@ class Reader(QObject):
         self._player.error.connect(self.error)
 
     @property
+    def pages(self) -> list[Page]:
+        """All pages of the open document."""
+        return list(self._pages)
+
+    @property
     def page_count(self) -> int:
         """Number of pages in the open document (0 if none)."""
         return len(self._pages)

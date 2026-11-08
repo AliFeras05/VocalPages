@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import numpy as np
 
 from readaloud.tts import (
+    FairLock,
     clamp_speed,
     locate_segments,
     normalize_page_text,
@@ -59,3 +63,28 @@ def test_segments_can_be_located_in_display_text() -> None:
     spans = locate_segments(display, segments)
     assert display == "First line of a paragraph. Second one!\n\nNext paragraph here."
     assert [display[a:b] for a, b in spans] == segments
+
+
+def test_fair_lock_alternates_between_threads() -> None:
+    lock = FairLock()
+    order: list[str] = []
+    started = threading.Event()
+
+    def greedy() -> None:
+        for _ in range(4):
+            with lock:
+                order.append("export")
+                started.set()
+                time.sleep(0.02)
+
+    def player() -> None:
+        started.wait()
+        with lock:
+            order.append("play")
+
+    threads = [threading.Thread(target=greedy), threading.Thread(target=player)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert order.index("play") <= 2

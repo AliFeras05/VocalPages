@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, QThread, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QKeySequence, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QSpinBox,
     QTextEdit,
     QToolBar,
@@ -22,6 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from readaloud import APP_NAME
+from readaloud.export import ExportResult, output_format, resolve_page_range
+from readaloud.export_dialog import ExportWorker, PageRangeDialog
 from readaloud.pdf_extract import PdfError, extract_pages
 from readaloud.playback import PlayerState, Reader
 from readaloud.state import ResumeStore, fingerprint
@@ -45,6 +48,10 @@ class MainWindow(QMainWindow):
         self._reader = Reader(self._engine, self)
         self._store = resume_store or ResumeStore()
         self._pdf_key = ""
+        self._pdf_stem = ""
+        self._export_thread: QThread | None = None
+        self._export_worker: ExportWorker | None = None
+        self._export_progress: QProgressDialog | None = None
         self._spans: list[tuple[int, int]] = []
 
         self._build_actions()
@@ -96,6 +103,11 @@ class MainWindow(QMainWindow):
         )
         toolbar.addWidget(self.speed_combo)
 
+        toolbar.addSeparator()
+        self.export_action = QAction("Export audio…", self, shortcut=QKeySequence("Ctrl+E"))
+        self.export_action.triggered.connect(self.start_export)
+        toolbar.addAction(self.export_action)
+
     def _build_layout(self) -> None:
         self.page_label = QLabel("No PDF open", self)
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -143,6 +155,7 @@ class MainWindow(QMainWindow):
 
         self._pdf_key = ""  # don't record the old PDF's key while switching
         self.setWindowTitle(f"{path.name} — {APP_NAME}")
+        self._pdf_stem = path.stem
         key = fingerprint(path)
         self._reader.set_pages(pages, start_page=self._ask_resume_page(key, len(pages)))
         self._pdf_key = key
@@ -172,6 +185,97 @@ class MainWindow(QMainWindow):
     def _jump_to_spin_page(self) -> None:
         if self.page_spin.value() != self._reader.current_page:
             self._reader.go_to_page(self.page_spin.value())
+
+    @Slot()
+    def start_export(self) -> None:
+        """Ask for a page range and output file, then export on a worker thread."""
+        if self._export_thread is not None or self._reader.page_count == 0:
+            return
+        dialog = PageRangeDialog(self._reader.page_count, self._reader.current_page, self)
+        if dialog.exec() != PageRangeDialog.DialogCode.Accepted:
+            return
+        try:
+            numbers = resolve_page_range(*dialog.selected_range(), self._reader.page_count)
+        except ValueError as exc:
+            self._show_error(str(exc))
+            return
+
+        suggested = str(Path.home() / f"{self._pdf_stem}.mp3")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export audio", suggested, "MP3 audio (*.mp3);;WAV audio (*.wav)"
+        )
+        if not path:
+            return
+        out_path = Path(path)
+        try:
+            output_format(out_path)
+        except ValueError as exc:
+            self._show_error(str(exc))
+            return
+
+        worker = ExportWorker(
+            self._reader.pages, numbers, out_path, self._engine, self.speed_combo.currentData()
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_export_progress)
+        worker.finished.connect(self._on_export_finished)
+        worker.failed.connect(self._on_export_failed)
+        worker.cancelled.connect(self._on_export_cancelled)
+
+        progress = QProgressDialog("Preparing export…", "Cancel", 0, 0, self)
+        progress.setWindowTitle("Exporting audio")
+        progress.setModal(False)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.canceled.connect(worker.cancel)
+        progress.show()
+
+        self._export_thread, self._export_worker, self._export_progress = thread, worker, progress
+        self._update_controls()
+        thread.start()
+
+    @Slot(int, int)
+    def _on_export_progress(self, done: int, total: int) -> None:
+        if self._export_progress is not None:
+            self._export_progress.setMaximum(total)
+            self._export_progress.setValue(done)
+            self._export_progress.setLabelText(f"Synthesizing sentence {done} of {total}…")
+
+    @Slot(object)
+    def _on_export_finished(self, result: ExportResult) -> None:
+        self._end_export()
+        minutes, seconds = divmod(round(result.duration_seconds), 60)
+        message = f"Exported {result.path.name} ({minutes}:{seconds:02d})."
+        if result.skipped_pages:
+            pages = ", ".join(map(str, result.skipped_pages))
+            message += f"\nSkipped page(s) with no extractable text: {pages}."
+        QMessageBox.information(self, APP_NAME, message)
+
+    @Slot(str)
+    def _on_export_failed(self, message: str) -> None:
+        self._end_export()
+        self._show_error(f"Export failed: {message}")
+
+    @Slot()
+    def _on_export_cancelled(self) -> None:
+        self._end_export()
+        self.statusBar().showMessage("Export cancelled.", 5000)
+
+    def _end_export(self) -> None:
+        if self._export_progress is not None:
+            self._export_progress.close()
+            self._export_progress.deleteLater()
+        if self._export_thread is not None:
+            self._export_thread.quit()
+            self._export_thread.wait()
+            self._export_thread.deleteLater()
+        if self._export_worker is not None:
+            self._export_worker.deleteLater()
+        self._export_thread = self._export_worker = self._export_progress = None
+        self._update_controls()
 
     @Slot()
     def _toggle_play(self) -> None:
@@ -242,6 +346,7 @@ class MainWindow(QMainWindow):
         self.next_action.setEnabled(has_doc and current < self._reader.page_count)
         self.page_spin.setEnabled(has_doc)
         self.go_action.setEnabled(has_doc)
+        self.export_action.setEnabled(has_doc and self._export_thread is None)
         self.play_action.setText("Pause" if state is PlayerState.PLAYING else
                                  "Resume" if state is PlayerState.PAUSED else "Play")
         self.stop_action.setEnabled(state is not PlayerState.STOPPED)
@@ -250,5 +355,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt API name)
         """Stop audio and background threads before closing."""
+        if self._export_worker is not None and self._export_thread is not None:
+            self._export_worker.cancel()
+            self._export_thread.quit()
+            self._export_thread.wait()
         self._reader.shutdown()
         super().closeEvent(event)
