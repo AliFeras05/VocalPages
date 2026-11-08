@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
+# GUI-dependent tests must not open windows or need a display.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from pathlib import Path
 
 import pymupdf

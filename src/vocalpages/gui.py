@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, Qt, QThread, Slot
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -20,9 +20,9 @@ from PySide6.QtGui import (
     QTextCursor,
 )
 from PySide6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QLabel,
+    QMenu,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -32,15 +32,17 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTextEdit,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from vocalpages import APP_NAME
+from vocalpages import APP_NAME, theme
 from vocalpages.document import Document, DocumentError
 from vocalpages.export import ExportResult, output_format, resolve_section_range
 from vocalpages.export_dialog import ExportWorker, RangeDialog
 from vocalpages.playback import PlayerState, Reader
+from vocalpages.icons import IconSet
 from vocalpages.home import FILE_DIALOG_FILTER, HomePage, is_supported, local_file_from_mime
 from vocalpages.library import BookRecord, Library
 from vocalpages.sidebar import LibrarySidebar
@@ -63,6 +65,7 @@ class MainWindow(QMainWindow):
         self.resize(1100, 720)
         self.setAcceptDrops(True)
 
+        self.icons = IconSet(theme.LIGHT, self)
         self._engine = engine or KokoroEngine()
         self._reader = Reader(self._engine, self)
         self._library = library or Library()
@@ -84,50 +87,72 @@ class MainWindow(QMainWindow):
     def _build_actions(self) -> None:
         toolbar = QToolBar("Playback", self)
         toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setIconSize(QSize(theme.ICON_MEDIUM, theme.ICON_MEDIUM))
         self.addToolBar(toolbar)
         self.toolbar = toolbar
 
-        self.open_action = QAction("Open…", self, shortcut=QKeySequence.StandardKey.Open)
+        self.open_action = self._icon_action("folder-open", "Open a book", QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.choose_file)
-        self.play_action = QAction("Play", self, shortcut=Qt.Key.Key_Space)
+        self.play_action = self._icon_action("play", "Play", Qt.Key.Key_Space)
         self.play_action.triggered.connect(self._toggle_play)
-        self.stop_action = QAction("Stop", self)
+        self.stop_action = self._icon_action("square", "Stop")
         self.stop_action.triggered.connect(self._reader.stop)
-        self.prev_action = QAction("◀ Previous", self, shortcut=Qt.Key.Key_PageUp)
+        self.prev_action = self._icon_action("skip-back", "Previous page", Qt.Key.Key_PageUp)
         self.prev_action.triggered.connect(lambda: self._reader.go_to_section(self._reader.current_section - 1))
-        self.next_action = QAction("Next ▶", self, shortcut=Qt.Key.Key_PageDown)
+        self.next_action = self._icon_action("skip-forward", "Next page", Qt.Key.Key_PageDown)
         self.next_action.triggered.connect(lambda: self._reader.go_to_section(self._reader.current_section + 1))
 
         for action in (self.open_action, self.play_action, self.stop_action, self.prev_action, self.next_action):
             toolbar.addAction(action)
 
         toolbar.addSeparator()
-        self.goto_label = QLabel(" Go to page ", self)
-        toolbar.addWidget(self.goto_label)
         self.section_spin = QSpinBox(self)
         self.section_spin.setMinimum(1)
         self.section_spin.setKeyboardTracking(False)
         self.section_spin.editingFinished.connect(self._jump_to_spin_section)
         toolbar.addWidget(self.section_spin)
-        self.go_action = QAction("Go", self)
+        self.go_action = self._icon_action("corner-down-left", "Go to page")
         self.go_action.triggered.connect(self._jump_to_spin_section)
         toolbar.addAction(self.go_action)
 
         toolbar.addSeparator()
-        toolbar.addWidget(QLabel(" Speed ", self))
-        self.speed_combo = QComboBox(self)
+        self.speed_button = QToolButton(self)
+        self.speed_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.icons.bind(self.speed_button, "gauge")
+        speed_menu = QMenu(self.speed_button)
         for speed in SPEEDS:
-            self.speed_combo.addItem(f"{speed:g}×", speed)
-        self.speed_combo.setCurrentIndex(SPEEDS.index(1.0))
-        self.speed_combo.currentIndexChanged.connect(
-            lambda _i: self._reader.set_speed(self.speed_combo.currentData())
-        )
-        toolbar.addWidget(self.speed_combo)
+            action = speed_menu.addAction(f"{speed:g}×")
+            action.setCheckable(True)
+            action.setData(speed)
+            action.setChecked(speed == 1.0)
+            action.triggered.connect(lambda _checked=False, s=speed: self._set_speed(s))
+        self.speed_menu = speed_menu
+        self.speed_button.setMenu(speed_menu)
+        toolbar.addWidget(self.speed_button)
+        self._set_speed(1.0)
 
         toolbar.addSeparator()
-        self.export_action = QAction("Export audio…", self, shortcut=QKeySequence("Ctrl+E"))
+        self.export_action = self._icon_action("download", "Export audio", QKeySequence("Ctrl+E"))
         self.export_action.triggered.connect(self.start_export)
         toolbar.addAction(self.export_action)
+
+    def _icon_action(self, icon: str, label: str, shortcut: object = None) -> QAction:
+        """An icon-only action: ``label`` becomes its tooltip and accessible name."""
+        action = QAction(label, self)
+        if shortcut is not None:
+            action.setShortcut(shortcut)
+            action.setToolTip(f"{label} ({QKeySequence(shortcut).toString(QKeySequence.SequenceFormat.NativeText)})")
+        self.icons.bind(action, icon)
+        return action
+
+    def _set_speed(self, speed: float) -> None:
+        for action in self.speed_menu.actions():
+            action.setChecked(action.data() == speed)
+        self.speed_button.setToolTip(f"Speed: {speed:g}×")
+        self.speed_button.setAccessibleName(f"Reading speed, {speed:g} times")
+        self.speed = speed
+        self._reader.set_speed(speed)
 
     def _build_layout(self) -> None:
         self.page_label = QLabel("No document open", self)
@@ -147,14 +172,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.page_label)
         layout.addWidget(self.text_view)
 
-        self.home = HomePage(self)
+        self.home = HomePage(self.icons, self)
         self.home.choose_requested.connect(self.choose_file)
 
         self.stack = QStackedWidget(self)
         self.stack.addWidget(self.home)
         self.stack.addWidget(reading_view)
 
-        self.sidebar = LibrarySidebar(self)
+        self.sidebar = LibrarySidebar(self.icons, self)
         self.sidebar.home_requested.connect(self.show_home)
         self.sidebar.book_selected.connect(self.open_book)
         self.sidebar.remove_requested.connect(self._confirm_remove)
@@ -246,7 +271,15 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(1)
         self.toolbar.setVisible(True)
         self.setWindowTitle(f"{document.title} — {APP_NAME}")
-        self.goto_label.setText(f" Go to {document.unit.lower()} ")
+        unit = document.unit.lower()
+        self.prev_action.setText(f"Previous {unit}")
+        self.next_action.setText(f"Next {unit}")
+        self.go_action.setText(f"Go to {unit}")
+        self.section_spin.setToolTip(f"{document.unit} number")
+        self.section_spin.setAccessibleName(f"{document.unit} number")
+        for action, key in ((self.prev_action, Qt.Key.Key_PageUp), (self.next_action, Qt.Key.Key_PageDown)):
+            native = QKeySequence(key).toString(QKeySequence.SequenceFormat.NativeText)
+            action.setToolTip(f"{action.text()} ({native})")
         self._reader.set_document(document, start_section=record.section, start_sentence=record.sentence)
         self._book = record
         self._refresh_sidebar()
@@ -286,7 +319,7 @@ class MainWindow(QMainWindow):
         self._library.save_position(self._book.id, section, sentence)
         if section != self._book.section:
             self._book = replace(self._book, section=section, sentence=sentence)
-            self.sidebar.update_progress(self._book.id, self._book.progress_text)
+            self.sidebar.update_progress(self._book)
 
     def _refresh_sidebar(self) -> None:
         self.sidebar.set_books(self._library.books(), self._book.id if self._book else None)
@@ -326,7 +359,7 @@ class MainWindow(QMainWindow):
             return
 
         worker = ExportWorker(
-            document.sections, numbers, out_path, self._engine, self.speed_combo.currentData()
+            document.sections, numbers, out_path, self._engine, self.speed
         )
         thread = QThread(self)
         worker.moveToThread(thread)
@@ -460,8 +493,11 @@ class MainWindow(QMainWindow):
         self.section_spin.setEnabled(has_doc)
         self.go_action.setEnabled(has_doc)
         self.export_action.setEnabled(has_doc and self._export_thread is None)
-        self.play_action.setText("Pause" if state is PlayerState.PLAYING else
-                                 "Resume" if state is PlayerState.PAUSED else "Play")
+        playing = state is PlayerState.PLAYING
+        label = "Pause" if playing else "Resume" if state is PlayerState.PAUSED else "Play"
+        self.play_action.setText(label)
+        self.play_action.setToolTip(f"{label} (Space)")
+        self.icons.bind(self.play_action, "pause" if playing else "play")
         self.stop_action.setEnabled(state is not PlayerState.STOPPED)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 (Qt API name)

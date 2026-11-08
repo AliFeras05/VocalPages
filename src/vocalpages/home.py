@@ -1,16 +1,23 @@
-"""Home page: app name, a drop area for PDF/EPUB files and a file-picker button."""
+"""Home page: app name, tagline, a drop zone for PDF/EPUB files and a file-picker button.
+
+Only structure lives here; all styling comes from the theme stylesheet via
+object names and the ``dragActive`` property.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, Qt, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from vocalpages import APP_NAME
+from vocalpages import APP_NAME, theme
 from vocalpages.document import SUPPORTED_EXTENSIONS
+from vocalpages.icons import IconSet
 
 FILE_DIALOG_FILTER = "Books (*.pdf *.epub);;PDF files (*.pdf);;EPUB files (*.epub)"
+TAGLINE = "Your PDFs and EPUBs, read aloud. Offline."
+CONTENT_MAX_WIDTH = 640
 
 
 def local_file_from_mime(mime: QMimeData) -> Path | None:
@@ -30,73 +37,121 @@ def is_supported(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_EXTENSIONS
 
 
+class ErrorBanner(QFrame):
+    """An inline error: always an alert icon plus text, never color alone."""
+
+    def __init__(self, icons: IconSet, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("errorBanner")
+        self.setAccessibleName("Error")
+        self.icon = QLabel(self)
+        self.icon.setObjectName("errorIcon")
+        self.icon.setAccessibleName("Error")
+        icons.bind(self.icon, "circle-alert", role="error", size=theme.ICON_MEDIUM)
+        self.text = QLabel(self)
+        self.text.setObjectName("errorText")
+        self.text.setWordWrap(True)
+        self.text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(theme.space(2), theme.space(1.5), theme.space(2), theme.space(1.5))
+        layout.setSpacing(theme.space(1.5))
+        layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.text, 1)
+
+    def show_message(self, message: str) -> None:
+        """Show ``message`` with the alert icon."""
+        self.text.setText(message)
+        self.setAccessibleDescription(message)
+        self.show()
+
+
 class HomePage(QWidget):
     """Landing page. Emits ``choose_requested``; the main window opens files."""
 
     choose_requested = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, icons: IconSet, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        name = QLabel(APP_NAME, self)
-        font = name.font()
-        font.setPointSize(font.pointSize() + 26)
-        font.setBold(True)
-        name.setFont(font)
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setObjectName("homePage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
 
-        tagline = QLabel("Listen to your PDFs and EPUBs, read aloud offline.", self)
+        title = QLabel(APP_NAME, self)
+        title.setObjectName("homeTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tagline = QLabel(TAGLINE, self)
+        tagline.setObjectName("homeTagline")
         tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tagline.setStyleSheet("color: palette(placeholder-text);")
 
-        self.drop_area = QFrame(self)
-        self.drop_area.setObjectName("dropArea")
-        self.drop_area.setMinimumSize(420, 220)
-        drop_title = QLabel("Drop a PDF or EPUB here", self.drop_area)
-        drop_font = drop_title.font()
-        drop_font.setPointSize(drop_font.pointSize() + 6)
-        drop_title.setFont(drop_font)
-        self.choose_button = QPushButton("Choose a file", self.drop_area)
-        self.choose_button.setMinimumHeight(36)
+        self.drop_zone = QFrame(self)
+        self.drop_zone.setObjectName("dropZone")
+        self.drop_zone.setMinimumHeight(theme.space(30))
+        self.drop_zone.setAccessibleName("Drop zone for PDF and EPUB files")
+        drop_icon = QLabel(self.drop_zone)
+        drop_icon.setObjectName("dropIcon")
+        icons.bind(drop_icon, "file-up", role="accent", size=theme.space(5))
+        drop_title = QLabel("Drop a PDF or EPUB here", self.drop_zone)
+        drop_title.setObjectName("dropTitle")
+        drop_hint = QLabel("or", self.drop_zone)
+        drop_hint.setObjectName("dropHint")
+
+        self.choose_button = QPushButton("  Choose a file", self.drop_zone)  # leading gap after the icon
+        self.choose_button.setObjectName("primaryButton")
+        self.choose_button.setToolTip("Choose a PDF or EPUB file (Ctrl+O)")
+        self.choose_button.setAccessibleName("Choose a file")
+        self.choose_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        icons.bind(self.choose_button, "folder-open", role="on_accent", size=theme.ICON_MEDIUM)
         self.choose_button.clicked.connect(self.choose_requested)
-        drop_layout = QVBoxLayout(self.drop_area)
+
+        drop_layout = QVBoxLayout(self.drop_zone)
+        drop_layout.setContentsMargins(theme.space(4), theme.space(4), theme.space(4), theme.space(4))
+        drop_layout.setSpacing(theme.space(1.5))
         drop_layout.addStretch()
-        drop_layout.addWidget(drop_title, alignment=Qt.AlignmentFlag.AlignCenter)
-        drop_layout.addWidget(QLabel("or", self.drop_area), alignment=Qt.AlignmentFlag.AlignCenter)
-        drop_layout.addWidget(self.choose_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        for widget in (drop_icon, drop_title, drop_hint, self.choose_button):
+            drop_layout.addWidget(widget, alignment=Qt.AlignmentFlag.AlignCenter)
         drop_layout.addStretch()
 
-        self.error_label = QLabel(self)
-        self.error_label.setObjectName("homeError")
-        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet("color: #e5534b; font-weight: 600;")
-        self.error_label.hide()
+        self.error = ErrorBanner(icons, self)
+        self.error.hide()
+
+        column = QWidget(self)
+        column.setMaximumWidth(CONTENT_MAX_WIDTH)
+        column_layout = QVBoxLayout(column)
+        column_layout.setContentsMargins(0, 0, 0, 0)
+        column_layout.setSpacing(0)
+        column_layout.addWidget(title)
+        column_layout.addSpacing(theme.space(1))
+        column_layout.addWidget(tagline)
+        column_layout.addSpacing(theme.space(5))
+        column_layout.addWidget(self.drop_zone)
+        column_layout.addSpacing(theme.space(2))
+        column_layout.addWidget(self.error)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setContentsMargins(theme.space(5), theme.space(5), theme.space(5), theme.space(5))
         layout.addStretch(2)
-        layout.addWidget(name)
-        layout.addWidget(tagline)
-        layout.addSpacing(28)
-        layout.addWidget(self.drop_area, 3)
-        layout.addSpacing(12)
-        layout.addWidget(self.error_label)
-        layout.addStretch(2)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(column, 6)
+        row.addStretch(1)
+        layout.addLayout(row)
+        layout.addStretch(3)
         self.set_drag_active(False)
 
     def set_drag_active(self, active: bool) -> None:
-        """Highlight the drop area while a file is dragged over the window."""
-        border = "palette(highlight)" if active else "palette(mid)"
-        self.drop_area.setStyleSheet(
-            f"#dropArea {{ border: 2px dashed {border}; border-radius: 16px; }}"
-        )
+        """Turn the drop zone the accent color while a file is dragged over the window."""
+        self.drop_zone.setProperty("dragActive", "true" if active else "false")
+        self.drop_zone.style().unpolish(self.drop_zone)
+        self.drop_zone.style().polish(self.drop_zone)
 
     def show_error(self, message: str) -> None:
-        """Show an inline error under the drop area."""
-        self.error_label.setText(message)
-        self.error_label.show()
+        """Show an inline error (alert icon plus text) under the drop zone."""
+        self.error.show_message(message)
 
     def clear_error(self) -> None:
         """Hide the inline error."""
-        self.error_label.clear()
-        self.error_label.hide()
+        self.error.hide()
+
+    @property
+    def error_label(self) -> QLabel:
+        """The error text label (for tests and accessibility tools)."""
+        return self.error.text
