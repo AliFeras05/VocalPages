@@ -78,6 +78,35 @@ def split_into_segments(text: str, max_chars: int = MAX_SEGMENT_CHARS) -> list[s
     return segments
 
 
+def normalize_page_text(text: str) -> str:
+    """Collapse whitespace inside paragraphs, keeping blank lines between them.
+
+    This is the text shown to the user; every segment from
+    ``split_into_segments`` appears in it verbatim, in order.
+    """
+    paragraphs = (" ".join(p.split()) for p in re.split(r"\n\s*\n", text))
+    return "\n\n".join(p for p in paragraphs if p)
+
+
+def locate_segments(display_text: str, segments: list[str]) -> list[tuple[int, int]]:
+    """Return the (start, end) character span of each segment within ``display_text``.
+
+    Segments are searched in order; a segment that cannot be found gets an
+    empty span at the current position.
+    """
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    for segment in segments:
+        start = display_text.find(segment, pos)
+        if start < 0:
+            spans.append((pos, pos))
+            continue
+        end = start + len(segment)
+        spans.append((start, end))
+        pos = end
+    return spans
+
+
 def clamp_speed(speed: float) -> float:
     """Clamp a speaking speed to the range Kokoro handles well."""
     return max(MIN_SPEED, min(MAX_SPEED, speed))

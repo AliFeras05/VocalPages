@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from readaloud.tts import clamp_speed, split_into_segments, to_pcm16
+from readaloud.tts import (
+    clamp_speed,
+    locate_segments,
+    normalize_page_text,
+    split_into_segments,
+    to_pcm16,
+)
 
 
 def test_splits_sentences() -> None:
@@ -44,3 +50,12 @@ def test_clamp_speed() -> None:
 def test_to_pcm16_scales_and_clips() -> None:
     pcm = np.frombuffer(to_pcm16(np.array([0.0, 1.0, -2.0], dtype=np.float32)), dtype="<i2")
     assert pcm.tolist() == [0, 32767, -32767]
+
+
+def test_segments_can_be_located_in_display_text() -> None:
+    text = "First  line of\na paragraph. Second one!\n\n  Next   paragraph here."
+    display = normalize_page_text(text)
+    segments = split_into_segments(text)
+    spans = locate_segments(display, segments)
+    assert display == "First line of a paragraph. Second one!\n\nNext paragraph here."
+    assert [display[a:b] for a, b in spans] == segments
