@@ -234,6 +234,9 @@ QToolButton {{
 QToolButton:hover {{ background: {p.hover}; }}
 QToolButton:pressed {{ background: {p.selected}; }}
 QToolButton:focus {{ outline: none; border: 2px solid {p.accent}; }}
+QToolButton::menu-indicator {{ image: none; width: 0px; }}
+QToolButton#speedButton {{ padding-right: {space(1)}px; }}
+QSpinBox {{ min-width: {space(6)}px; }}
 QToolButton#playButton {{
     background: {p.accent};
     border-radius: {PLAY_BUTTON_SIZE // 2}px;
@@ -335,10 +338,6 @@ QWidget#bookRow {{ background: transparent; }}
 QLabel#bookTitle {{ font-weight: 600; background: transparent; }}
 QLabel#bookTitle[current="true"] {{ color: {p.accent}; }}
 QLabel#bookProgressLabel {{ color: {p.text_muted}; font-size: {FONT_SIZE_SMALL}px; background: transparent; }}
-QWidget#sidebar QToolButton#navButton {{
-    padding: {space(1)}px {space(1.5)}px;
-    text-align: left;
-}}
 QWidget#sidebarFooter {{ border-top: 1px solid {p.separator}; background: {p.sidebar}; }}
 
 /* ----- home page ----- */
@@ -385,6 +384,6 @@ QFrame#playerBar {{
     background: {p.surface};
     border-top: 1px solid {p.separator};
 }}
-QLabel#playerLabel {{ color: {p.text_muted}; font-size: {FONT_SIZE_SMALL}px; background: transparent; }}
+QLabel#playerLabel {{ color: {p.text_muted}; font-size: {FONT_SIZE_BODY}px; font-weight: 500; background: transparent; }}
 QLabel#positionLabel {{ color: {p.text}; font-size: {FONT_SIZE_SMALL}px; font-weight: 500; background: transparent; }}
 """

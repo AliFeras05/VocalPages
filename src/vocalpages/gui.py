@@ -10,28 +10,26 @@ from PySide6.QtCore import QEvent, QObject, QSize, Qt, QThread, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
-    QColor,
     QDragEnterEvent,
     QDragLeaveEvent,
     QDropEvent,
     QKeySequence,
     QMouseEvent,
-    QTextCharFormat,
-    QTextCursor,
+
 )
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QMenu,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
+    QProgressBar,
     QProgressDialog,
     QSplitter,
     QSpinBox,
     QStackedWidget,
-    QTextEdit,
-    QToolBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,6 +40,7 @@ from vocalpages.document import Document, DocumentError
 from vocalpages.export import ExportResult, output_format, resolve_section_range
 from vocalpages.export_dialog import ExportWorker, RangeDialog
 from vocalpages.playback import PlayerState, Reader
+from vocalpages.reader_view import ReaderView
 from vocalpages.icons import IconSet
 from vocalpages.home import FILE_DIALOG_FILTER, HomePage, is_supported, local_file_from_mime
 from vocalpages.library import BookRecord, Library
@@ -49,8 +48,6 @@ from vocalpages.sidebar import LibrarySidebar
 from vocalpages.sentences import locate_sentences, sentence_at
 from vocalpages.tts import KokoroEngine
 
-HIGHLIGHT_COLOR = QColor(255, 230, 140)
-HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light and dark themes
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 
 
@@ -85,13 +82,6 @@ class MainWindow(QMainWindow):
     # ----- construction -------------------------------------------------
 
     def _build_actions(self) -> None:
-        toolbar = QToolBar("Playback", self)
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        toolbar.setIconSize(QSize(theme.ICON_MEDIUM, theme.ICON_MEDIUM))
-        self.addToolBar(toolbar)
-        self.toolbar = toolbar
-
         self.open_action = self._icon_action("folder-open", "Open a book", QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.choose_file)
         self.play_action = self._icon_action("play", "Play", Qt.Key.Key_Space)
@@ -102,22 +92,20 @@ class MainWindow(QMainWindow):
         self.prev_action.triggered.connect(lambda: self._reader.go_to_section(self._reader.current_section - 1))
         self.next_action = self._icon_action("skip-forward", "Next page", Qt.Key.Key_PageDown)
         self.next_action.triggered.connect(lambda: self._reader.go_to_section(self._reader.current_section + 1))
+        self.go_action = self._icon_action("corner-down-left", "Go to page")
+        self.go_action.triggered.connect(self._jump_to_spin_section)
+        self.export_action = self._icon_action("download", "Export audio", QKeySequence("Ctrl+E"))
+        self.export_action.triggered.connect(self.start_export)
+        for action in (self.open_action, self.play_action, self.prev_action, self.next_action, self.export_action):
+            self.addAction(action)  # shortcuts work wherever the buttons are
 
-        for action in (self.open_action, self.play_action, self.stop_action, self.prev_action, self.next_action):
-            toolbar.addAction(action)
-
-        toolbar.addSeparator()
         self.section_spin = QSpinBox(self)
         self.section_spin.setMinimum(1)
         self.section_spin.setKeyboardTracking(False)
         self.section_spin.editingFinished.connect(self._jump_to_spin_section)
-        toolbar.addWidget(self.section_spin)
-        self.go_action = self._icon_action("corner-down-left", "Go to page")
-        self.go_action.triggered.connect(self._jump_to_spin_section)
-        toolbar.addAction(self.go_action)
 
-        toolbar.addSeparator()
         self.speed_button = QToolButton(self)
+        self.speed_button.setObjectName("speedButton")
         self.speed_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.icons.bind(self.speed_button, "gauge")
         speed_menu = QMenu(self.speed_button)
@@ -125,17 +113,12 @@ class MainWindow(QMainWindow):
             action = speed_menu.addAction(f"{speed:g}×")
             action.setCheckable(True)
             action.setData(speed)
-            action.setChecked(speed == 1.0)
             action.triggered.connect(lambda _checked=False, s=speed: self._set_speed(s))
         self.speed_menu = speed_menu
         self.speed_button.setMenu(speed_menu)
-        toolbar.addWidget(self.speed_button)
+        self.speed_value = QLabel(self)
+        self.speed_value.setObjectName("playerLabel")
         self._set_speed(1.0)
-
-        toolbar.addSeparator()
-        self.export_action = self._icon_action("download", "Export audio", QKeySequence("Ctrl+E"))
-        self.export_action.triggered.connect(self.start_export)
-        toolbar.addAction(self.export_action)
 
     def _icon_action(self, icon: str, label: str, shortcut: object = None) -> QAction:
         """An icon-only action: ``label`` becomes its tooltip and accessible name."""
@@ -149,28 +132,104 @@ class MainWindow(QMainWindow):
     def _set_speed(self, speed: float) -> None:
         for action in self.speed_menu.actions():
             action.setChecked(action.data() == speed)
-        self.speed_button.setToolTip(f"Speed: {speed:g}×")
+        self.speed_button.setToolTip(f"Reading speed: {speed:g}×")
+        self.speed_value.setText(f"{speed:g}×")
         self.speed_button.setAccessibleName(f"Reading speed, {speed:g} times")
         self.speed = speed
         self._reader.set_speed(speed)
 
-    def _build_layout(self) -> None:
-        self.page_label = QLabel("No document open", self)
-        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    def _action_button(self, action: QAction, object_name: str = "") -> QToolButton:
+        """An icon-only button driven by ``action`` (icon, tooltip, enabled state)."""
+        button = QToolButton(self)
+        button.setDefaultAction(action)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setAutoRaise(True)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        if object_name:
+            button.setObjectName(object_name)
+        button.setAccessibleName(action.text())
+        action.changed.connect(lambda: button.setAccessibleName(action.text()))
+        return button
 
-        self.text_view = QPlainTextEdit(self)
-        self.text_view.setReadOnly(True)
-        font = self.text_view.font()
-        font.setPointSize(font.pointSize() + 3)
-        self.text_view.setFont(font)
+    def _build_reader_page(self) -> QWidget:
+        page = QWidget(self)
+        page.setObjectName("readerPage")
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+
+        self.book_heading = QLabel(page)
+        self.book_heading.setObjectName("bookHeading")
+        self.page_label = QLabel(page)
+        self.page_label.setObjectName("sectionTitle")
+        titles = QVBoxLayout()
+        titles.setSpacing(theme.space(0.5))
+        titles.addWidget(self.page_label)
+        titles.addWidget(self.book_heading)
+        header = QHBoxLayout()
+        header.setContentsMargins(theme.space(4), theme.space(3), theme.space(3), theme.space(1))
+        header.addLayout(titles, 1)
+        header.addWidget(self._action_button(self.open_action))
+        header.addWidget(self._action_button(self.export_action))
+
+        self.text_view = ReaderView(page)
         self.text_view.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         self.text_view.viewport().installEventFilter(self)
         self.text_view.setToolTip("Click a sentence to start reading from it")
 
-        reading_view = QWidget(self)
-        layout = QVBoxLayout(reading_view)
-        layout.addWidget(self.page_label)
-        layout.addWidget(self.text_view)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addLayout(header)
+        layout.addWidget(self.text_view, 1)
+        layout.addWidget(self._build_player_bar(page))
+        return page
+
+    def _build_player_bar(self, parent: QWidget) -> QFrame:
+        bar = QFrame(parent)
+        bar.setObjectName("playerBar")
+        bar.setAccessibleName("Player controls")
+
+        self.play_button = self._action_button(self.play_action, "playButton")
+        self.icons.bind(self.play_action, "play", role="on_accent", size=theme.ICON_LARGE)
+        controls = QHBoxLayout()
+        controls.setSpacing(theme.space(1))
+        controls.addWidget(self._action_button(self.stop_action))
+        controls.addWidget(self._action_button(self.prev_action))
+        controls.addWidget(self.play_button)
+        controls.addWidget(self._action_button(self.next_action))
+
+        self.position_label = QLabel(bar)
+        self.position_label.setObjectName("positionLabel")
+        self.section_progress = QProgressBar(bar)
+        self.section_progress.setObjectName("sectionProgress")
+        self.section_progress.setTextVisible(False)
+        self.section_progress.setAccessibleName("Position in book")
+        progress = QVBoxLayout()
+        progress.setSpacing(theme.space(1))
+        progress.addStretch()
+        progress.addWidget(self.position_label)
+        progress.addWidget(self.section_progress)
+        progress.addStretch()
+
+        jump = QHBoxLayout()
+        jump.setSpacing(theme.space(0.5))
+        jump.addWidget(self.section_spin)
+        jump.addWidget(self._action_button(self.go_action))
+        speed = QHBoxLayout()
+        speed.setSpacing(0)
+        speed.addWidget(self.speed_button)
+        speed.addWidget(self.speed_value)
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(theme.space(3), theme.space(1.5), theme.space(3), theme.space(1.5))
+        layout.setSpacing(theme.space(3))
+        layout.addLayout(controls)
+        layout.addLayout(progress, 1)
+        layout.addLayout(jump)
+        layout.addLayout(speed)
+        return bar
+
+    def _build_layout(self) -> None:
+        reading_view = self._build_reader_page()
 
         self.home = HomePage(self.icons, self)
         self.home.choose_requested.connect(self.choose_file)
@@ -189,7 +248,8 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
         splitter.setChildrenCollapsible(False)
-        splitter.setSizes([260, 840])
+        splitter.setSizes([theme.SIDEBAR_WIDTH, 1100 - theme.SIDEBAR_WIDTH])
+        splitter.setHandleWidth(1)
         self.setCentralWidget(splitter)
 
     def _connect_reader(self) -> None:
@@ -258,7 +318,6 @@ class MainWindow(QMainWindow):
         """Stop reading and show the home page."""
         self._reader.stop()
         self.stack.setCurrentIndex(0)
-        self.toolbar.setVisible(False)
         self.sidebar.select(None)
         self.setWindowTitle(APP_NAME)
         self.statusBar().clearMessage()
@@ -269,13 +328,13 @@ class MainWindow(QMainWindow):
             return
         self._book = None  # don't save positions while the new book loads
         self.stack.setCurrentIndex(1)
-        self.toolbar.setVisible(True)
         self.setWindowTitle(f"{document.title} — {APP_NAME}")
+        self.book_heading.setText(document.title)
         unit = document.unit.lower()
         self.prev_action.setText(f"Previous {unit}")
         self.next_action.setText(f"Next {unit}")
         self.go_action.setText(f"Go to {unit}")
-        self.section_spin.setToolTip(f"{document.unit} number")
+        self.section_spin.setToolTip(f"{document.unit} number (press Enter to go)")
         self.section_spin.setAccessibleName(f"{document.unit} number")
         for action, key in ((self.prev_action, Qt.Key.Key_PageUp), (self.next_action, Qt.Key.Key_PageDown)):
             native = QKeySequence(key).toString(QKeySequence.SequenceFormat.NativeText)
@@ -296,15 +355,18 @@ class MainWindow(QMainWindow):
         record = self._library.get(book_id)
         if record is None:
             return
-        answer = QMessageBox.question(
-            self,
-            APP_NAME,
-            f"Remove “{record.title}” from the library?\n\n"
-            "Your original file is not deleted; only VocalPages's copy and reading position are.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Remove from library")
+        box.setText(f"Remove “{record.title}” from the library?")
+        box.setInformativeText(
+            "This removes VocalPages' copy and your reading position. Your original file is not deleted."
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        remove = box.addButton("Remove from library", QMessageBox.ButtonRole.DestructiveRole)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel)
+        box.exec()
+        if box.clickedButton() is not remove:
             return
         if self._book is not None and self._book.id == book_id:
             self._book = None
@@ -436,17 +498,22 @@ class MainWindow(QMainWindow):
     def _show_section(self, number: int) -> None:
         section = self._reader.section(number)
         unit = self._reader.document.unit if self._reader.document else "Page"
-        self.page_label.setText(f"{unit} {number} of {self._reader.section_count}")
+        count = self._reader.section_count
+        self.page_label.setText(f"{unit.upper()} {number} OF {count}")
+        self.page_label.setAccessibleName(f"{unit} {number} of {count}")
+        self.position_label.setText(f"{unit} {number} of {count}")
+        self.section_progress.setRange(0, max(count, 1))
+        self.section_progress.setValue(number)
         self.section_spin.blockSignals(True)
         self.section_spin.setMaximum(self._reader.section_count)
         self.section_spin.setValue(number)
         self.section_spin.blockSignals(False)
         if section.has_text:
             self._spans = locate_sentences(section.text, list(section.sentences))
-            self.text_view.setPlainText(section.text)
+            self.text_view.set_section_text(section.text)
         else:
             self._spans = []
-            self.text_view.setPlainText(
+            self.text_view.set_section_text(
                 f"This {unit.lower()} has no readable text. It may be a scanned image; it will be skipped."
             )
         self._update_controls()
@@ -455,20 +522,7 @@ class MainWindow(QMainWindow):
     def _highlight_segment(self, section_number: int, index: int) -> None:
         if section_number != self._reader.current_section or not 0 <= index < len(self._spans):
             return
-        start, end = self._spans[index]
-        cursor = QTextCursor(self.text_view.document())
-        cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-        selection = QTextEdit.ExtraSelection()
-        selection.cursor = cursor
-        selection.format = QTextCharFormat()
-        selection.format.setBackground(HIGHLIGHT_COLOR)
-        selection.format.setForeground(HIGHLIGHT_TEXT_COLOR)
-        self.text_view.setExtraSelections([selection])
-        view_cursor = QTextCursor(cursor)
-        view_cursor.clearSelection()
-        self.text_view.setTextCursor(view_cursor)
-        self.text_view.ensureCursorVisible()
+        self.text_view.highlight(*self._spans[index])
 
     @Slot(int)
     def _on_section_skipped(self, number: int) -> None:
@@ -497,7 +551,7 @@ class MainWindow(QMainWindow):
         label = "Pause" if playing else "Resume" if state is PlayerState.PAUSED else "Play"
         self.play_action.setText(label)
         self.play_action.setToolTip(f"{label} (Space)")
-        self.icons.bind(self.play_action, "pause" if playing else "play")
+        self.icons.bind(self.play_action, "pause" if playing else "play", role="on_accent", size=theme.ICON_LARGE)
         self.stop_action.setEnabled(state is not PlayerState.STOPPED)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 (Qt API name)
