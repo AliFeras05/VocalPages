@@ -58,7 +58,7 @@ Windows: install Python 3.12 from [python.org](https://www.python.org/downloads/
 ### 2. Create a virtual environment and install VocalPages
 
 ```bash
-git clone https://github.com/AliFeras05/vocalpages.git
+git clone https://github.com/AliFeras05/VocalPages.git
 cd vocalpages
 python3.12 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
