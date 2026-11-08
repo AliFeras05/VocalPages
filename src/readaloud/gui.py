@@ -5,17 +5,29 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QKeySequence, QTextCharFormat, QTextCursor
+from PySide6.QtCore import QMimeData, Qt, QThread, Slot
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeySequence,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
+    QFrame,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
+    QPushButton,
     QSpinBox,
+    QStackedWidget,
     QTextEdit,
     QToolBar,
     QVBoxLayout,
@@ -35,6 +47,40 @@ HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light 
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 
 
+def pdf_from_mime(mime: QMimeData) -> Path | None:
+    """Return the first local ``.pdf`` file in dragged data, or None."""
+    for url in mime.urls():
+        if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf"):
+            return Path(url.toLocalFile())
+    return None
+
+
+class StartScreen(QFrame):
+    """Shown before a PDF is open: invites the user to drop or choose a file."""
+
+    def __init__(self, open_action: QAction, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("startScreen")
+        self.setStyleSheet(
+            "#startScreen { border: 2px dashed palette(mid); border-radius: 16px; }"
+        )
+        title = QLabel("Drop a PDF here", self)
+        font = title.font()
+        font.setPointSize(font.pointSize() + 10)
+        font.setBold(True)
+        title.setFont(font)
+        hint = QLabel("or", self)
+        button = QPushButton("Choose a PDF…", self)
+        button.setMinimumHeight(36)
+        button.clicked.connect(open_action.trigger)
+
+        layout = QVBoxLayout(self)
+        layout.addStretch()
+        for widget in (title, hint, button):
+            layout.addWidget(widget, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch()
+
+
 class MainWindow(QMainWindow):
     """Main application window."""
 
@@ -44,6 +90,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.resize(900, 700)
+        self.setAcceptDrops(True)
 
         self._engine = engine or KokoroEngine()
         self._reader = Reader(self._engine, self)
@@ -119,11 +166,20 @@ class MainWindow(QMainWindow):
         font.setPointSize(font.pointSize() + 3)
         self.text_view.setFont(font)
 
-        central = QWidget(self)
-        layout = QVBoxLayout(central)
+        reading_view = QWidget(self)
+        layout = QVBoxLayout(reading_view)
         layout.addWidget(self.page_label)
         layout.addWidget(self.text_view)
-        self.setCentralWidget(central)
+
+        start_container = QWidget(self)
+        start_layout = QVBoxLayout(start_container)
+        start_layout.setContentsMargins(40, 40, 40, 40)
+        start_layout.addWidget(StartScreen(self.open_action, start_container))
+
+        self.stack = QStackedWidget(self)
+        self.stack.addWidget(start_container)
+        self.stack.addWidget(reading_view)
+        self.setCentralWidget(self.stack)
 
     def _connect_reader(self) -> None:
         self._reader.page_changed.connect(self._show_page)
@@ -155,6 +211,7 @@ class MainWindow(QMainWindow):
             return
 
         self._pdf_key = ""  # don't record the old PDF's key while switching
+        self.stack.setCurrentIndex(1)
         self.setWindowTitle(f"{path.name} — {APP_NAME}")
         self._pdf_stem = path.stem
         key = fingerprint(path)
@@ -354,6 +411,18 @@ class MainWindow(QMainWindow):
         self.stop_action.setEnabled(state is not PlayerState.STOPPED)
         if state is PlayerState.STOPPED:
             self.text_view.setExtraSelections([])
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 (Qt API name)
+        """Accept drags that contain a PDF file."""
+        if pdf_from_mime(event.mimeData()) is not None:
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802 (Qt API name)
+        """Open a PDF dropped onto the window."""
+        path = pdf_from_mime(event.mimeData())
+        if path is not None:
+            event.acceptProposedAction()
+            self.open_pdf(path)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt API name)
         """Stop audio and background threads before closing."""

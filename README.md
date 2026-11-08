@@ -2,11 +2,11 @@
 
 A desktop app that reads PDFs aloud like an audiobook, using a local, offline text-to-speech engine.
 
-> **Screenshot:** _coming soon._ (Add an image at `docs/screenshot.png` and link it here.)
+![Readaloud start screen](docs/screenshot.png)
 
 ## Features
 
-- **Open a PDF** with a file picker (or pass a path on the command line).
+- **Open a PDF** by dragging it onto the window, with a file picker, or by passing a path on the command line.
 - **Clean text extraction** page by page: running headers, footers and page numbers are removed, words split across lines are rejoined, and ligatures (ﬁ, ﬂ) are expanded.
 - **Scanned pages are detected.** A page with no text layer gets a clear message and is skipped (there is no OCR).
 - **Offline speech** with [Kokoro](https://github.com/hexgrad/kokoro), an 82M-parameter neural TTS model that runs locally.
