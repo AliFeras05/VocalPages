@@ -15,8 +15,8 @@ import logging
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QThread, Signal, Slot
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QtAudio
 
-from readaloud.document import Document, Section
-from readaloud.tts import SAMPLE_RATE, KokoroEngine, TtsError, clamp_speed, to_pcm16
+from vocalpages.document import Document, Section
+from vocalpages.tts import SAMPLE_RATE, KokoroEngine, TtsError, clamp_speed, to_pcm16
 
 log = logging.getLogger(__name__)
 

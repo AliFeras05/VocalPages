@@ -17,7 +17,7 @@ from typing import Sequence
 
 import pymupdf
 
-from readaloud.document import Document, DocumentError, Section
+from vocalpages.document import Document, DocumentError, Section
 
 # Fraction of the page height treated as the top/bottom margin.
 MARGIN_FRACTION = 0.12

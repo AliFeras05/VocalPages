@@ -9,14 +9,14 @@ from pathlib import Path
 
 import numpy as np
 
-from readaloud.document import DocumentError, load_document
-from readaloud.tts import SAMPLE_RATE, KokoroEngine, TtsError, to_pcm16
+from vocalpages.document import DocumentError, load_document
+from vocalpages.tts import SAMPLE_RATE, KokoroEngine, TtsError, to_pcm16
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Return the argument parser for ``readaloud-cli``."""
+    """Return the argument parser for ``vocalpages-cli``."""
     parser = argparse.ArgumentParser(
-        prog="readaloud-cli", description="Read one page (PDF) or chapter (EPUB) aloud into a WAV file."
+        prog="vocalpages-cli", description="Read one page (PDF) or chapter (EPUB) aloud into a WAV file."
     )
     parser.add_argument("file", type=Path, help="document to read")
     parser.add_argument(

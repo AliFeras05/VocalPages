@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from readaloud.pdf_extract import (
+from vocalpages.pdf_extract import (
     PdfError,
     TextBlock,
     clean_pages,

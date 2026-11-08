@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from readaloud.library import BookRecord
+from vocalpages.library import BookRecord
 
 _ID_ROLE = Qt.ItemDataRole.UserRole
 

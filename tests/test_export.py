@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from readaloud.export import (
+from vocalpages.export import (
     SECTION_GAP_SECONDS,
     ExportCancelled,
     ExportError,
@@ -17,8 +17,8 @@ from readaloud.export import (
     output_format,
     resolve_section_range,
 )
-from readaloud.document import Section
-from readaloud.tts import SAMPLE_RATE
+from vocalpages.document import Section
+from vocalpages.tts import SAMPLE_RATE
 
 
 class FakeEngine:

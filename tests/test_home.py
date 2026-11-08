@@ -10,7 +10,7 @@ pytest.importorskip("PySide6.QtWidgets")
 
 from PySide6.QtCore import QMimeData, QUrl  # noqa: E402
 
-from readaloud.home import is_supported, local_file_from_mime  # noqa: E402
+from vocalpages.home import is_supported, local_file_from_mime  # noqa: E402
 
 
 def _mime(*urls: QUrl) -> QMimeData:

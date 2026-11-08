@@ -11,8 +11,8 @@ pytest.importorskip("ebooklib")
 
 from ebooklib import epub  # noqa: E402
 
-from readaloud.document import load_document  # noqa: E402
-from readaloud.epub_extract import (  # noqa: E402
+from vocalpages.document import load_document  # noqa: E402
+from vocalpages.epub_extract import (  # noqa: E402
     DrmProtectedError,
     EpubError,
     html_to_text,

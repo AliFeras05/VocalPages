@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from readaloud.sentences import normalize_text, split_sentences
+from vocalpages.sentences import normalize_text, split_sentences
 
 
 class DocumentError(Exception):
@@ -76,11 +76,11 @@ def load_document(path: str | Path) -> Document:
     """
     suffix = Path(path).suffix.lower()
     if suffix == ".pdf":
-        from readaloud.pdf_extract import load_pdf
+        from vocalpages.pdf_extract import load_pdf
 
         return load_pdf(path)
     if suffix == ".epub":
-        from readaloud.epub_extract import load_epub
+        from vocalpages.epub_extract import load_epub
 
         return load_epub(path)
     supported = ", ".join(SUPPORTED_EXTENSIONS)

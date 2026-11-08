@@ -7,8 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QMimeData, Qt, Signal
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from readaloud import APP_NAME
-from readaloud.document import SUPPORTED_EXTENSIONS
+from vocalpages import APP_NAME
+from vocalpages.document import SUPPORTED_EXTENSIONS
 
 FILE_DIALOG_FILTER = "Books (*.pdf *.epub);;PDF files (*.pdf);;EPUB files (*.epub)"
 

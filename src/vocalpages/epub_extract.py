@@ -15,7 +15,7 @@ from xml.etree import ElementTree
 
 from bs4 import BeautifulSoup, Tag
 
-from readaloud.document import Document, DocumentError, Section
+from vocalpages.document import Document, DocumentError, Section
 
 # Encryption algorithms used only to obfuscate embedded fonts; these books are not DRM-protected.
 FONT_OBFUSCATION_ALGORITHMS = frozenset(
@@ -106,7 +106,7 @@ def load_epub(path: str | Path) -> Document:
     if not Path(path).is_file():
         raise EpubError("Could not open EPUB: file not found.")
     if is_drm_protected(path):
-        raise DrmProtectedError("This EPUB is protected by DRM, which Readaloud cannot read.")
+        raise DrmProtectedError("This EPUB is protected by DRM, which VocalPages cannot read.")
 
     import ebooklib
     from ebooklib import epub

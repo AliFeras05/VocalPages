@@ -24,11 +24,13 @@ from pathlib import Path
 
 from platformdirs import user_data_dir
 
-from readaloud.document import Document, load_document
+from vocalpages.document import Document, load_document
 
 log = logging.getLogger(__name__)
 
-APP_DIR_NAME = "readaloud"
+APP_DIR_NAME = "vocalpages"
+# Data folders used by earlier releases (the app was called "Readaloud").
+LEGACY_APP_DIR_NAMES = ("readaloud",)
 DB_NAME = "library.sqlite3"
 BOOKS_DIR_NAME = "books"
 LEGACY_RESUME_FILE = "resume_positions.json"
@@ -66,6 +68,32 @@ def default_data_dir() -> Path:
     return Path(user_data_dir(APP_DIR_NAME, appauthor=False))
 
 
+def legacy_data_dirs() -> list[Path]:
+    """Return the data folders earlier releases used, newest name first."""
+    return [Path(user_data_dir(name, appauthor=False)) for name in LEGACY_APP_DIR_NAMES]
+
+
+def _has_app_data(folder: Path) -> bool:
+    return (folder / DB_NAME).is_file() or (folder / LEGACY_RESUME_FILE).is_file()
+
+
+def migrate_legacy_data_dir(new_dir: Path, legacy_dirs: list[Path]) -> Path | None:
+    """Copy an earlier release's data folder into ``new_dir`` if needed.
+
+    Runs only when ``new_dir`` has no library yet and a legacy folder has one.
+    The legacy folder is copied, never moved or deleted, so an older version of
+    the app keeps working. Returns the folder that was copied, or None.
+    """
+    if _has_app_data(new_dir):
+        return None
+    for legacy in legacy_dirs:
+        if legacy.resolve() != new_dir.resolve() and _has_app_data(legacy):
+            shutil.copytree(legacy, new_dir, dirs_exist_ok=True)
+            log.info("Copied library data from the previous app folder")
+            return legacy
+    return None
+
+
 def fingerprint(path: str | Path) -> str:
     """Return the SHA-256 hex digest of a file's contents."""
     digest = hashlib.sha256()
@@ -100,8 +128,16 @@ class BookRecord:
 class Library:
     """SQLite-backed library. Use from one thread (the GUI thread)."""
 
-    def __init__(self, data_dir: Path | None = None) -> None:
+    def __init__(self, data_dir: Path | None = None, legacy_dirs: list[Path] | None = None) -> None:
+        """Open (or create) the library in ``data_dir``.
+
+        With the default ``data_dir``, data from an earlier release's folder is
+        copied over first; pass ``legacy_dirs`` to control that explicitly.
+        """
         self.data_dir = data_dir or default_data_dir()
+        if legacy_dirs is None:
+            legacy_dirs = legacy_data_dirs() if data_dir is None else []
+        migrate_legacy_data_dir(self.data_dir, legacy_dirs)
         self.books_dir = self.data_dir / BOOKS_DIR_NAME
         self.books_dir.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(self.data_dir / DB_NAME)

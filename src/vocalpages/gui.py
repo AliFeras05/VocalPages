@@ -36,16 +36,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from readaloud import APP_NAME
-from readaloud.document import Document, DocumentError
-from readaloud.export import ExportResult, output_format, resolve_section_range
-from readaloud.export_dialog import ExportWorker, RangeDialog
-from readaloud.playback import PlayerState, Reader
-from readaloud.home import FILE_DIALOG_FILTER, HomePage, is_supported, local_file_from_mime
-from readaloud.library import BookRecord, Library
-from readaloud.sidebar import LibrarySidebar
-from readaloud.sentences import locate_sentences, sentence_at
-from readaloud.tts import KokoroEngine
+from vocalpages import APP_NAME
+from vocalpages.document import Document, DocumentError
+from vocalpages.export import ExportResult, output_format, resolve_section_range
+from vocalpages.export_dialog import ExportWorker, RangeDialog
+from vocalpages.playback import PlayerState, Reader
+from vocalpages.home import FILE_DIALOG_FILTER, HomePage, is_supported, local_file_from_mime
+from vocalpages.library import BookRecord, Library
+from vocalpages.sidebar import LibrarySidebar
+from vocalpages.sentences import locate_sentences, sentence_at
+from vocalpages.tts import KokoroEngine
 
 HIGHLIGHT_COLOR = QColor(255, 230, 140)
 HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light and dark themes
@@ -193,7 +193,7 @@ class MainWindow(QMainWindow):
         """
         if not is_supported(path):
             self._report_open_error(
-                f"“{path.name}” can't be opened. Readaloud reads PDF (.pdf) and EPUB (.epub) files."
+                f"“{path.name}” can't be opened. VocalPages reads PDF (.pdf) and EPUB (.epub) files."
             )
             return
         try:
@@ -267,7 +267,7 @@ class MainWindow(QMainWindow):
             self,
             APP_NAME,
             f"Remove “{record.title}” from the library?\n\n"
-            "Your original file is not deleted; only Readaloud's copy and reading position are.",
+            "Your original file is not deleted; only VocalPages's copy and reading position are.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

@@ -3,7 +3,7 @@
 import multiprocessing
 import sys
 
-from readaloud.__main__ import main
+from vocalpages.__main__ import main
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()

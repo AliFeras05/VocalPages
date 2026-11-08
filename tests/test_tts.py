@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 
-from readaloud.tts import FairLock, clamp_speed, to_pcm16
+from vocalpages.tts import FairLock, clamp_speed, to_pcm16
 
 
 def test_clamp_speed() -> None:

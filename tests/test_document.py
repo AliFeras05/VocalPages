@@ -7,8 +7,8 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from readaloud.document import Document, Section, UnsupportedFormatError, load_document
-from readaloud.pdf_extract import PdfError
+from vocalpages.document import Document, Section, UnsupportedFormatError, load_document
+from vocalpages.pdf_extract import PdfError
 
 
 def test_section_from_text_normalises_and_splits() -> None:

@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "readaloud"
+name = "vocalpages"
 version = "0.1.0"
 description = "Turn a PDF into spoken audio with an offline, local text-to-speech engine."
 readme = "README.md"
@@ -32,8 +32,8 @@ dev = ["pytest>=8"]
 app = ["pyinstaller>=6"]
 
 [project.scripts]
-readaloud = "readaloud.__main__:main"
-readaloud-cli = "readaloud.cli:main"
+vocalpages = "vocalpages.__main__:main"
+vocalpages-cli = "vocalpages.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

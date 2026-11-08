@@ -17,9 +17,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from readaloud.document import Section
-from readaloud.export import ExportCancelled, ExportError, Synthesizer, export_sections
-from readaloud.tts import TtsError
+from vocalpages.document import Section
+from vocalpages.export import ExportCancelled, ExportError, Synthesizer, export_sections
+from vocalpages.tts import TtsError
 
 
 class RangeDialog(QDialog):

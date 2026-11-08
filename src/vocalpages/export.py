@@ -17,8 +17,8 @@ from typing import Callable, Protocol, Sequence
 
 import numpy as np
 
-from readaloud.document import Section
-from readaloud.tts import SAMPLE_RATE, to_pcm16
+from vocalpages.document import Section
+from vocalpages.tts import SAMPLE_RATE, to_pcm16
 
 SUPPORTED_FORMATS = ("mp3", "wav")
 MP3_BITRATE = "96k"
@@ -121,7 +121,7 @@ def export_sections(
     plan = [list(section.sentences) for section in readable]
     total = sum(len(segments) for segments in plan)
 
-    with tempfile.TemporaryDirectory(prefix="readaloud-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="vocalpages-") as tmp:
         wav_path = out_path if fmt == "wav" else Path(tmp) / "export.wav"
         try:
             frames = _write_wav(plan, wav_path, engine, speed, total, progress, is_cancelled)

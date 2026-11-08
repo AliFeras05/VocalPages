@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from readaloud.sentences import (
+from vocalpages.sentences import (
     locate_sentences,
     normalize_text,
     sentence_at,

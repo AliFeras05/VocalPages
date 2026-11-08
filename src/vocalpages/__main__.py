@@ -1,4 +1,4 @@
-"""GUI entry point: ``readaloud [file.pdf]`` or ``python -m readaloud``."""
+"""GUI entry point: ``vocalpages [file.pdf]`` or ``python -m vocalpages``."""
 
 from __future__ import annotations
 
@@ -9,19 +9,19 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from readaloud import APP_NAME
+from vocalpages import APP_NAME
 
 
 def main() -> int:
     """Start the Qt application and return its exit code."""
-    level = os.environ.get("READALOUD_LOG_LEVEL", "WARNING").upper()
+    level = os.environ.get("VOCALPAGES_LOG_LEVEL", "WARNING").upper()
     logging.basicConfig(
         level=getattr(logging, level, logging.WARNING), format="%(levelname)s %(name)s: %(message)s"
     )
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
 
-    from readaloud.gui import MainWindow  # imported after QApplication exists
+    from vocalpages.gui import MainWindow  # imported after QApplication exists
 
     window = MainWindow()
     window.show()

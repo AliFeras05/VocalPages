@@ -1,5 +1,5 @@
-# PyInstaller spec for a double-clickable Readaloud app.
-# Build from the repository root with:  pyinstaller packaging/readaloud.spec
+# PyInstaller spec for a double-clickable VocalPages app.
+# Build from the repository root with:  pyinstaller packaging/vocalpages.spec
 # (see README, "Build a double-click app").
 
 import sys
@@ -30,19 +30,19 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Readaloud",
+    name="VocalPages",
     console=False,
     argv_emulation=False,
 )
-coll = COLLECT(exe, a.binaries, a.datas, name="Readaloud")
+coll = COLLECT(exe, a.binaries, a.datas, name="VocalPages")
 
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="Readaloud.app",
-        bundle_identifier="io.github.readaloud",
+        name="VocalPages.app",
+        bundle_identifier="io.github.vocalpages",
         info_plist={
-            "CFBundleDisplayName": "Readaloud",
+            "CFBundleDisplayName": "VocalPages",
             "CFBundleShortVersionString": "0.1.0",
             "NSHighResolutionCapable": True,
         },

@@ -1,8 +1,8 @@
-# Readaloud
+# VocalPages
 
 A desktop app that reads PDF and EPUB books aloud like an audiobook, using a local, offline text-to-speech engine.
 
-![Readaloud home page with the library sidebar](docs/screenshot.png)
+![VocalPages home page with the library sidebar](docs/screenshot.png)
 
 ## Features
 
@@ -48,11 +48,11 @@ sudo apt install python3.12 python3.12-venv ffmpeg
 
 Windows: install Python 3.12 from [python.org](https://www.python.org/downloads/) and ffmpeg from [ffmpeg.org](https://ffmpeg.org/download.html), then make sure `ffmpeg` is on your `PATH`.
 
-### 2. Create a virtual environment and install Readaloud
+### 2. Create a virtual environment and install VocalPages
 
 ```bash
-git clone https://github.com/<your-username>/readaloud.git
-cd readaloud
+git clone https://github.com/<your-username>/vocalpages.git
+cd vocalpages
 python3.12 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
@@ -64,15 +64,15 @@ python -m pip install -e ".[dev]"
 ### Desktop app
 
 ```bash
-readaloud                 # or: python -m readaloud
-readaloud path/to/book.pdf
+vocalpages                 # or: python -m vocalpages
+vocalpages path/to/book.pdf
 ```
 
 The window opens on the home page: drag a PDF or EPUB onto it or click **Choose a file**. The book is added to the library sidebar and opened. Click a sentence to start reading from it. The first launch takes a little longer while the voice model loads; the status bar says when it is ready.
 
-Adding a book that is already in the library (same contents, any file name) opens the existing entry. To remove a book, click its **✕** or right-click it and choose **Remove from library…**. This only removes Readaloud's copy and your reading position; your original file is never touched.
+Adding a book that is already in the library (same contents, any file name) opens the existing entry. To remove a book, click its **✕** or right-click it and choose **Remove from library…**. This only removes VocalPages's copy and your reading position; your original file is never touched.
 
-Set `READALOUD_LOG_LEVEL=INFO` (or `DEBUG`) to see diagnostic logging in the terminal.
+Set `VOCALPAGES_LOG_LEVEL=INFO` (or `DEBUG`) to see diagnostic logging in the terminal.
 
 | Control | Shortcut |
 | --- | --- |
@@ -85,25 +85,25 @@ Speed changes take effect from the next sentence.
 
 ### Build a double-click app (macOS)
 
-To launch Readaloud from Finder, the Dock or Launchpad with no terminal, build a standalone `Readaloud.app` with PyInstaller:
+To launch VocalPages from Finder, the Dock or Launchpad with no terminal, build a standalone `VocalPages.app` with PyInstaller:
 
 ```bash
 python -m pip install -e ".[app]"
 python -m spacy download en_core_web_sm   # bundled so the app never needs pip
-pyinstaller --noconfirm packaging/readaloud.spec
+pyinstaller --noconfirm packaging/vocalpages.spec
 ```
 
-The app appears at `dist/Readaloud.app` (about 1 GB, mostly PyTorch). Drag it into your Applications folder, then open it and drop a PDF or EPUB onto the window. The voice model is still downloaded on first launch and cached in your user folder. MP3 export uses the system `ffmpeg` (Homebrew's is found automatically).
+The app appears at `dist/VocalPages.app` (about 1 GB, mostly PyTorch). Drag it into your Applications folder, then open it and drop a PDF or EPUB onto the window. The voice model is still downloaded on first launch and cached in your user folder. MP3 export uses the system `ffmpeg` (Homebrew's is found automatically).
 
-The same spec builds a `dist/Readaloud/` folder app on Windows and Linux. That build is untested.
+The same spec builds a `dist/VocalPages/` folder app on Windows and Linux. That build is untested.
 
 ### Command line
 
 Synthesize a single page (PDF) or chapter (EPUB) to a WAV file:
 
 ```bash
-readaloud-cli path/to/book.pdf --page 3 --out page3.wav --speed 1.25
-readaloud-cli path/to/book.epub --chapter 2 --out chapter2.wav
+vocalpages-cli path/to/book.pdf --page 3 --out page3.wav --speed 1.25
+vocalpages-cli path/to/book.epub --chapter 2 --out chapter2.wav
 ```
 
 ### Run the tests
@@ -117,10 +117,10 @@ The tests build their own small PDFs and EPUBs at runtime and use a fake TTS eng
 ## Project structure
 
 ```
-readaloud/
-├── src/readaloud/
-│   ├── __main__.py       # GUI entry point (readaloud)
-│   ├── cli.py            # single page/chapter CLI (readaloud-cli)
+vocalpages/
+├── src/vocalpages/
+│   ├── __main__.py       # GUI entry point (vocalpages)
+│   ├── cli.py            # single page/chapter CLI (vocalpages-cli)
 │   ├── document.py       # shared Document/Section model, load_document()
 │   ├── pdf_extract.py    # PDF loader: PyMuPDF, header/footer/page-number cleaning
 │   ├── epub_extract.py   # EPUB loader: spine order, HTML cleaning, DRM detection
@@ -134,7 +134,7 @@ readaloud/
 │   ├── sidebar.py        # library sidebar widget
 │   └── export_dialog.py  # export range dialog and worker thread
 ├── tests/                # pytest suite; generates its own PDFs and EPUBs
-├── packaging/            # PyInstaller spec and launcher for Readaloud.app
+├── packaging/            # PyInstaller spec and launcher for VocalPages.app
 ├── docs/                 # screenshot
 ├── pyproject.toml
 ├── LICENSE
@@ -149,16 +149,18 @@ The library lives in your platform's user data directory (via `platformdirs`), n
 
 | OS | Folder |
 | --- | --- |
-| macOS | `~/Library/Application Support/readaloud/` |
-| Linux | `~/.local/share/readaloud/` (or `$XDG_DATA_HOME/readaloud/`) |
-| Windows | `%LOCALAPPDATA%\readaloud\` |
+| macOS | `~/Library/Application Support/vocalpages/` |
+| Linux | `~/.local/share/vocalpages/` (or `$XDG_DATA_HOME/vocalpages/`) |
+| Windows | `%LOCALAPPDATA%\vocalpages\` |
 
 Inside it:
 
 - `library.sqlite3`: one row per book with its title, author, format, progress and reading position (page or chapter, plus sentence).
-- `books/`: Readaloud's own copy of each book, named by the SHA-256 of its contents. The library keeps working if you move or delete the original file.
+- `books/`: VocalPages's own copy of each book, named by the SHA-256 of its contents. The library keeps working if you move or delete the original file.
 
 Only the original file *name* is stored for reference, never its folder path. To reset everything, quit the app and delete that folder.
+
+**Upgrading from Readaloud** (this app's earlier name): on first launch, VocalPages copies your library, book copies and reading positions from the old `readaloud` data folder into the new `vocalpages` one. The old folder is left untouched.
 
 **Upgrading from an earlier version:** positions saved in the old `resume_positions.json` are imported automatically on first start. A book picks up its saved page the first time you add that same file again. The old file is left in place.
 

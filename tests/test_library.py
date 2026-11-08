@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from readaloud.document import UnsupportedFormatError
-from readaloud.library import Library, fingerprint
+from vocalpages.document import UnsupportedFormatError
+from vocalpages.library import Library, fingerprint, migrate_legacy_data_dir
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ def test_books_are_listed_most_recent_first(library: Library, sample_pdf: Path, 
 
 
 def test_chapter_progress_text() -> None:
-    from readaloud.library import BookRecord
+    from vocalpages.library import BookRecord
 
     record = BookRecord("x", "T", "", "epub", "Chapter", 12, "x.epub", "t.epub", 3, 0)
     assert record.progress_text == "Ch 3 of 12"
@@ -133,4 +133,44 @@ def test_legacy_migration_runs_only_once(tmp_path: Path, sample_pdf: Path) -> No
     lib.remove(record.id)
     record, _, _ = lib.add(sample_pdf)
     assert record.section == 1  # legacy position was consumed by the first add
+    lib.close()
+
+
+def test_old_data_folder_is_copied_on_first_launch(tmp_path: Path, sample_pdf: Path) -> None:
+    old_dir = tmp_path / "readaloud"
+    old = Library(old_dir, legacy_dirs=[])
+    record, _, _ = old.add(sample_pdf)
+    old.save_position(record.id, 3, 1)
+    old.close()
+    (old_dir / "resume_positions.json").write_text("{}")
+
+    new_dir = tmp_path / "vocalpages"
+    lib = Library(new_dir, legacy_dirs=[old_dir])
+    migrated = lib.get(record.id)
+    assert migrated is not None
+    assert (migrated.section, migrated.sentence) == (3, 1)
+    assert lib.load(record.id).section_count == 5  # book copy came along
+    lib.close()
+
+    # The old folder is left exactly where it was.
+    assert (old_dir / "library.sqlite3").is_file()
+    assert (old_dir / "books" / f"{record.id}.pdf").is_file()
+
+
+def test_migration_does_not_overwrite_an_existing_new_library(tmp_path: Path, sample_pdf: Path) -> None:
+    old_dir, new_dir = tmp_path / "readaloud", tmp_path / "vocalpages"
+    old = Library(old_dir, legacy_dirs=[])
+    old.add(sample_pdf)
+    old.close()
+    Library(new_dir, legacy_dirs=[]).close()  # new library already exists (empty)
+
+    assert migrate_legacy_data_dir(new_dir, [old_dir]) is None
+    lib = Library(new_dir, legacy_dirs=[old_dir])
+    assert lib.books() == []
+    lib.close()
+
+
+def test_no_legacy_folder_means_fresh_library(tmp_path: Path) -> None:
+    lib = Library(tmp_path / "vocalpages", legacy_dirs=[tmp_path / "missing"])
+    assert lib.books() == []
     lib.close()
