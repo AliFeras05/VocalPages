@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "readaloud"
+version = "0.1.0"
+description = "Turn a PDF into spoken audio with an offline, local text-to-speech engine."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ali" }]
+# Kokoro 0.9.x supports Python 3.10-3.12 only.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "PySide6>=6.6",
+    "PyMuPDF>=1.24",
+    "kokoro>=0.9.4",
+    "pydub>=0.25",
+    "platformdirs>=4.0",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Environment :: X11 Applications :: Qt",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
