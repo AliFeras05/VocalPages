@@ -9,6 +9,7 @@ into paragraphs with line-break hyphenation repaired.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,7 +71,12 @@ def normalize_for_matching(text: str) -> str:
 
 
 def join_block_lines(text: str) -> str:
-    """Join the lines of one block into a single paragraph, repairing hyphenated breaks."""
+    """Join the lines of one block into a single paragraph.
+
+    Repairs hyphenated line breaks and expands typographic ligatures
+    (for example "ﬂ" to "fl") so the TTS engine reads words correctly.
+    """
+    text = unicodedata.normalize("NFKC", text)
     dehyphenated = _HYPHEN_BREAK_RE.sub(r"\1", text.strip())
     dehyphenated = _HYPHEN_KEEP_RE.sub("-", dehyphenated)
     return _WHITESPACE_RE.sub(" ", dehyphenated).strip()

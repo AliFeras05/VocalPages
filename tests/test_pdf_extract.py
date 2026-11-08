@@ -41,6 +41,10 @@ def test_join_block_lines_keeps_real_hyphens() -> None:
     assert join_block_lines("a well-\nKnown name") == "a well-Known name"
 
 
+def test_join_block_lines_expands_ligatures() -> None:
+    assert join_block_lines("the \ufb02at was \ufb01ne") == "the flat was fine"
+
+
 def test_clean_pages_removes_repeated_header_and_numbered_footer() -> None:
     pages = [
         _page(("My Book", 0.03), (f"Body of page {n}.", 0.3), (f"Page {n}", 0.95))
