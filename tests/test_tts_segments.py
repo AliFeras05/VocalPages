@@ -1,0 +1,46 @@
+"""Tests for the pure text helpers in the TTS module (no model needed)."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from readaloud.tts import clamp_speed, split_into_segments, to_pcm16
+
+
+def test_splits_sentences() -> None:
+    assert split_into_segments("One here. Two there! Three?") == ["One here.", "Two there!", "Three?"]
+
+
+def test_closing_quote_stays_with_sentence() -> None:
+    assert split_into_segments('He said "Hi." Then left.') == ['He said "Hi."', "Then left."]
+
+
+def test_paragraph_break_ends_segment() -> None:
+    assert split_into_segments("No stop here\n\nNew paragraph.") == ["No stop here", "New paragraph."]
+
+
+def test_abbreviation_does_not_split() -> None:
+    assert split_into_segments("Dr. Smith arrived. He sat.") == ["Dr. Smith arrived.", "He sat."]
+
+
+def test_long_sentence_is_split_under_limit() -> None:
+    text = ", ".join(["word " * 10] * 10) + "."
+    segments = split_into_segments(text, max_chars=100)
+    assert len(segments) > 1
+    assert all(len(s) <= 100 for s in segments)
+    assert " ".join(segments).split() == text.split()
+
+
+def test_empty_text_gives_no_segments() -> None:
+    assert split_into_segments("  \n\n ") == []
+
+
+def test_clamp_speed() -> None:
+    assert clamp_speed(0.1) == 0.5
+    assert clamp_speed(1.3) == 1.3
+    assert clamp_speed(5) == 2.0
+
+
+def test_to_pcm16_scales_and_clips() -> None:
+    pcm = np.frombuffer(to_pcm16(np.array([0.0, 1.0, -2.0], dtype=np.float32)), dtype="<i2")
+    assert pcm.tolist() == [0, 32767, -32767]
