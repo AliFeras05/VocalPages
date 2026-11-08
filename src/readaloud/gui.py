@@ -74,9 +74,9 @@ class MainWindow(QMainWindow):
         self.play_action.triggered.connect(self._toggle_play)
         self.stop_action = QAction("Stop", self)
         self.stop_action.triggered.connect(self._reader.stop)
-        self.prev_action = QAction("◀ Previous", self, shortcut=QKeySequence.StandardKey.MoveToPreviousPage)
+        self.prev_action = QAction("◀ Previous", self, shortcut=Qt.Key.Key_PageUp)
         self.prev_action.triggered.connect(lambda: self._reader.go_to_page(self._reader.current_page - 1))
-        self.next_action = QAction("Next ▶", self, shortcut=QKeySequence.StandardKey.MoveToNextPage)
+        self.next_action = QAction("Next ▶", self, shortcut=Qt.Key.Key_PageDown)
         self.next_action.triggered.connect(lambda: self._reader.go_to_page(self._reader.current_page + 1))
 
         for action in (self.open_action, self.play_action, self.stop_action, self.prev_action, self.next_action):
