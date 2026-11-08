@@ -36,5 +36,6 @@ Thumbs.db
 # --- App saved state (normally stored in the user data dir, never in the repo) ---
 resume_positions.json
 
-# --- User PDFs (tests generate their own fixture PDFs at runtime) ---
+# --- User books (tests generate their own fixture PDFs/EPUBs at runtime) ---
 *.pdf
+*.epub

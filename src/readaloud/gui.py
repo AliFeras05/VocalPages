@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, Qt, QThread, Slot
+from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QThread, Slot
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -13,6 +13,7 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDropEvent,
     QKeySequence,
+    QMouseEvent,
     QTextCharFormat,
     QTextCursor,
 )
@@ -40,7 +41,8 @@ from readaloud.export import ExportResult, output_format, resolve_section_range
 from readaloud.export_dialog import ExportWorker, RangeDialog
 from readaloud.playback import PlayerState, Reader
 from readaloud.state import ResumeStore, fingerprint
-from readaloud.tts import KokoroEngine, locate_segments
+from readaloud.sentences import locate_sentences, sentence_at
+from readaloud.tts import KokoroEngine
 
 HIGHLIGHT_COLOR = QColor(255, 230, 140)
 HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light and dark themes
@@ -166,6 +168,9 @@ class MainWindow(QMainWindow):
         font = self.text_view.font()
         font.setPointSize(font.pointSize() + 3)
         self.text_view.setFont(font)
+        self.text_view.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        self.text_view.viewport().installEventFilter(self)
+        self.text_view.setToolTip("Click a sentence to start reading from it")
 
         reading_view = QWidget(self)
         layout = QVBoxLayout(reading_view)
@@ -184,7 +189,7 @@ class MainWindow(QMainWindow):
 
     def _connect_reader(self) -> None:
         self._reader.section_changed.connect(self._show_section)
-        self._reader.segment_started.connect(self._highlight_segment)
+        self._reader.position_changed.connect(self._highlight_segment)
         self._reader.section_skipped.connect(self._on_section_skipped)
         self._reader.state_changed.connect(lambda _state: self._update_controls())
         self._reader.finished.connect(lambda: self.statusBar().showMessage("Finished reading.", 5000))
@@ -362,7 +367,7 @@ class MainWindow(QMainWindow):
         if self._doc_key:
             self._store.set(self._doc_key, number)
         if section.has_text:
-            self._spans = locate_segments(section.text, list(section.sentences))
+            self._spans = locate_sentences(section.text, list(section.sentences))
             self.text_view.setPlainText(section.text)
         else:
             self._spans = []
@@ -416,8 +421,21 @@ class MainWindow(QMainWindow):
         self.play_action.setText("Pause" if state is PlayerState.PLAYING else
                                  "Resume" if state is PlayerState.PAUSED else "Play")
         self.stop_action.setEnabled(state is not PlayerState.STOPPED)
-        if state is PlayerState.STOPPED:
-            self.text_view.setExtraSelections([])
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 (Qt API name)
+        """Start reading from a sentence when it is clicked (a drag-selection is left alone)."""
+        if (
+            watched is self.text_view.viewport()
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and isinstance(event, QMouseEvent)
+            and event.button() == Qt.MouseButton.LeftButton
+            and not self.text_view.textCursor().hasSelection()
+        ):
+            position = self.text_view.cursorForPosition(event.position().toPoint()).position()
+            index = sentence_at(self._spans, position)
+            if index is not None:
+                self._reader.play_from(index)
+        return super().eventFilter(watched, event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 (Qt API name)
         """Accept drags that contain a PDF file."""

@@ -249,7 +249,8 @@ class Reader(QObject):
     """
 
     section_changed = Signal(int)  # 1-based section number
-    segment_started = Signal(int, int)  # section number, sentence index
+    segment_started = Signal(int, int)  # section number, sentence index (audio started)
+    position_changed = Signal(int, int)  # section number, sentence index (reading position)
     section_skipped = Signal(int)  # section number with no readable text
     state_changed = Signal(PlayerState)
     finished = Signal()
@@ -260,8 +261,9 @@ class Reader(QObject):
         super().__init__(parent)
         self._document: Document | None = None
         self._current = 1
+        self._sentence = 0
         self._player = SegmentPlayer(engine, self)
-        self._player.segment_started.connect(lambda i: self.segment_started.emit(self._current, i))
+        self._player.segment_started.connect(self._on_segment_started)
         self._player.finished.connect(self._on_section_finished)
         self._player.state_changed.connect(self.state_changed)
         self._player.engine_ready.connect(self.engine_ready)
@@ -283,6 +285,11 @@ class Reader(QObject):
         return self._current
 
     @property
+    def current_sentence(self) -> int:
+        """0-based index of the sentence playback starts from (or is reading now)."""
+        return self._sentence
+
+    @property
     def state(self) -> PlayerState:
         """Current playback state."""
         return self._player.state
@@ -293,12 +300,29 @@ class Reader(QObject):
             raise IndexError("No document is open")
         return self._document.section(number)
 
-    def set_document(self, document: Document, start_section: int = 1) -> None:
-        """Load a new document and show ``start_section`` without playing."""
+    def set_document(self, document: Document, start_section: int = 1, start_sentence: int = 0) -> None:
+        """Load a new document and show ``start_section`` without playing.
+
+        ``start_sentence`` is where the next Play begins (for resuming).
+        """
         self._player.stop()
         self._document = document
         self._current = 1
         self.go_to_section(start_section)
+        sentences = len(self.section(self._current).sentences)
+        if 0 < start_sentence < sentences:
+            self._set_position(self._current, start_sentence)
+
+    def play_from(self, sentence: int) -> None:
+        """Stop whatever is playing and start reading the current section at ``sentence``."""
+        if not self.section_count:
+            return
+        sentences = self.section(self._current).sentences
+        if not 0 <= sentence < len(sentences):
+            return
+        self._player.stop()
+        self._set_position(self._current, sentence)
+        self._player.play(list(sentences), start_index=sentence)
 
     def go_to_section(self, number: int) -> None:
         """Make ``number`` the current section. Keeps playing if playback was active."""
@@ -309,12 +333,14 @@ class Reader(QObject):
         was_active = self._player.state is not PlayerState.STOPPED
         self._player.stop()
         self._current = number
+        self._sentence = 0
         self.section_changed.emit(number)
+        self.position_changed.emit(number, 0)
         if was_active:
             self._play_current(direction)
 
     def play(self) -> None:
-        """Play from the start of the current section, or resume if paused."""
+        """Play from the current sentence, or resume if paused."""
         if self._player.state is PlayerState.PAUSED:
             self._player.resume()
         elif self._player.state is PlayerState.STOPPED and self.section_count:
@@ -325,7 +351,7 @@ class Reader(QObject):
         self._player.pause()
 
     def stop(self) -> None:
-        """Stop playback; the current section stays selected."""
+        """Stop playback; the current section and sentence stay selected."""
         self._player.stop()
 
     def set_speed(self, speed: float) -> None:
@@ -346,8 +372,11 @@ class Reader(QObject):
                 self.finished.emit()
                 return
             self._current = nxt
+            self._sentence = 0
             self.section_changed.emit(nxt)
-        self._player.play(list(self.section(self._current).sentences))
+        sentences = self.section(self._current).sentences
+        start = self._sentence if self._sentence < len(sentences) else 0
+        self._player.play(list(sentences), start_index=start)
 
     @Slot()
     def _on_section_finished(self) -> None:
@@ -355,5 +384,16 @@ class Reader(QObject):
             self.finished.emit()
             return
         self._current += 1
+        self._sentence = 0
         self.section_changed.emit(self._current)
+        self.position_changed.emit(self._current, 0)
         self._play_current(direction=1)
+
+    def _set_position(self, section: int, sentence: int) -> None:
+        self._sentence = sentence
+        self.position_changed.emit(section, sentence)
+
+    @Slot(int)
+    def _on_segment_started(self, index: int) -> None:
+        self._set_position(self._current, index)
+        self.segment_started.emit(self._current, index)

@@ -8,7 +8,6 @@ playback and export threads can share a single model instance.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import warnings
 from contextlib import contextmanager
@@ -24,87 +23,10 @@ DEFAULT_LANG_CODE = "a"  # American English
 KOKORO_REPO_ID = "hexgrad/Kokoro-82M"
 MIN_SPEED = 0.5
 MAX_SPEED = 2.0
-MAX_SEGMENT_CHARS = 400
-
-_ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "prof", "st", "vs", "etc", "e.g", "i.e", "fig", "no"}
-_SENTENCE_END_RE = re.compile(r"(?:(?<=[.!?…])|(?<=[.!?…][\"'”’)\]]))\s+")
 
 
 class TtsError(Exception):
     """Raised when the TTS engine cannot be loaded or fails to synthesize."""
-
-
-def _ends_with_abbreviation(sentence: str) -> bool:
-    words = sentence.rstrip().split()
-    return bool(words) and words[-1].rstrip(".").lower() in _ABBREVIATIONS
-
-
-def _split_long(sentence: str, max_chars: int) -> list[str]:
-    """Split an over-long sentence at word boundaries, preferring commas and semicolons."""
-    parts: list[str] = []
-    rest = sentence
-    while len(rest) > max_chars:
-        window = rest[:max_chars]
-        cut = max(window.rfind(", "), window.rfind("; "))
-        cut = cut + 1 if cut > max_chars // 3 else window.rfind(" ")
-        if cut <= 0:
-            cut = max_chars
-        parts.append(rest[:cut].strip())
-        rest = rest[cut:].strip()
-    if rest:
-        parts.append(rest)
-    return parts
-
-
-def split_into_segments(text: str, max_chars: int = MAX_SEGMENT_CHARS) -> list[str]:
-    """Split page text into sentence-sized segments for synthesis and highlighting.
-
-    Paragraph breaks always end a segment. Common abbreviations such as "Dr." do
-    not, and sentences longer than ``max_chars`` are broken at word boundaries.
-    """
-    segments: list[str] = []
-    for paragraph in re.split(r"\n\s*\n", text):
-        paragraph = " ".join(paragraph.split())
-        if not paragraph:
-            continue
-        pending = ""
-        for piece in _SENTENCE_END_RE.split(paragraph):
-            pending = f"{pending} {piece}".strip() if pending else piece.strip()
-            if pending and not _ends_with_abbreviation(pending):
-                segments.extend(_split_long(pending, max_chars))
-                pending = ""
-        if pending:
-            segments.extend(_split_long(pending, max_chars))
-    return segments
-
-
-def normalize_page_text(text: str) -> str:
-    """Collapse whitespace inside paragraphs, keeping blank lines between them.
-
-    This is the text shown to the user; every segment from
-    ``split_into_segments`` appears in it verbatim, in order.
-    """
-    paragraphs = (" ".join(p.split()) for p in re.split(r"\n\s*\n", text))
-    return "\n\n".join(p for p in paragraphs if p)
-
-
-def locate_segments(display_text: str, segments: list[str]) -> list[tuple[int, int]]:
-    """Return the (start, end) character span of each segment within ``display_text``.
-
-    Segments are searched in order; a segment that cannot be found gets an
-    empty span at the current position.
-    """
-    spans: list[tuple[int, int]] = []
-    pos = 0
-    for segment in segments:
-        start = display_text.find(segment, pos)
-        if start < 0:
-            spans.append((pos, pos))
-            continue
-        end = start + len(segment)
-        spans.append((start, end))
-        pos = end
-    return spans
 
 
 def clamp_speed(speed: float) -> float:

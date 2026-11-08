@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from readaloud.tts import normalize_page_text, split_into_segments
+from readaloud.sentences import normalize_text, split_sentences
 
 
 class DocumentError(Exception):
@@ -33,8 +33,8 @@ class Section:
     @classmethod
     def from_text(cls, number: int, title: str, text: str) -> "Section":
         """Build a section from raw text, normalising whitespace and splitting sentences."""
-        display = normalize_page_text(text)
-        return cls(number=number, title=title, text=display, sentences=tuple(split_into_segments(display)))
+        display = normalize_text(text)
+        return cls(number=number, title=title, text=display, sentences=tuple(split_sentences(display)))
 
     @property
     def has_text(self) -> bool:
