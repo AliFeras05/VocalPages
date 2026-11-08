@@ -23,6 +23,9 @@ from readaloud.tts import SAMPLE_RATE, split_into_segments, to_pcm16
 SUPPORTED_FORMATS = ("mp3", "wav")
 MP3_BITRATE = "96k"
 PAGE_GAP_SECONDS = 0.8
+# Apps launched from the macOS Finder don't inherit the shell PATH, so also
+# look where Homebrew and common installers put ffmpeg.
+FFMPEG_FALLBACK_DIRS = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
 
 ProgressCallback = Callable[[int, int], None]
 CancelCheck = Callable[[], bool]
@@ -50,6 +53,18 @@ class ExportResult:
     duration_seconds: float
     exported_pages: list[int] = field(default_factory=list)
     skipped_pages: list[int] = field(default_factory=list)
+
+
+def find_ffmpeg() -> str | None:
+    """Return the path of an ffmpeg executable, or None if none is installed."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for directory in FFMPEG_FALLBACK_DIRS:
+        found = shutil.which("ffmpeg", path=directory)
+        if found:
+            return found
+    return None
 
 
 def resolve_page_range(start: int | None, end: int | None, page_count: int) -> list[int]:
@@ -95,7 +110,8 @@ def export_pages(
     """
     out_path = Path(out_path)
     fmt = output_format(out_path)
-    if fmt == "mp3" and shutil.which("ffmpeg") is None:
+    ffmpeg = find_ffmpeg() if fmt == "mp3" else None
+    if fmt == "mp3" and ffmpeg is None:
         raise ExportError("MP3 export needs ffmpeg. Install it, or export to WAV instead.")
 
     selected = [pages[n - 1] for n in page_numbers]
@@ -109,8 +125,8 @@ def export_pages(
         wav_path = out_path if fmt == "wav" else Path(tmp) / "export.wav"
         try:
             frames = _write_wav(plan, wav_path, engine, speed, total, progress, is_cancelled)
-            if fmt == "mp3":
-                _convert_to_mp3(wav_path, out_path)
+            if ffmpeg is not None:
+                _convert_to_mp3(wav_path, out_path, ffmpeg)
         except BaseException:
             out_path.unlink(missing_ok=True)
             raise
@@ -156,11 +172,13 @@ def _write_wav(
     return frames
 
 
-def _convert_to_mp3(wav_path: Path, mp3_path: Path) -> None:
+def _convert_to_mp3(wav_path: Path, mp3_path: Path, ffmpeg: str) -> None:
     with warnings.catch_warnings():
         # pydub 0.25 emits Syntax/Deprecation warnings (with install paths) on import.
         warnings.simplefilter("ignore")
         from pydub import AudioSegment
+
+    AudioSegment.converter = ffmpeg
 
     try:
         AudioSegment.from_wav(wav_path).export(mp3_path, format="mp3", bitrate=MP3_BITRATE)

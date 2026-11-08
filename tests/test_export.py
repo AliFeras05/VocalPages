@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import wave
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from readaloud.export import (
     ExportCancelled,
     ExportError,
     export_pages,
+    find_ffmpeg,
     output_format,
     resolve_page_range,
 )
@@ -123,7 +123,13 @@ def test_export_only_empty_pages_raises(tmp_path: Path) -> None:
         export_pages(PAGES, [3], tmp_path / "out.wav", FakeEngine())
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_find_ffmpeg_without_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", "")
+    found = find_ffmpeg()
+    assert found is None or Path(found).name == "ffmpeg"
+
+
+@pytest.mark.skipif(find_ffmpeg() is None, reason="ffmpeg not installed")
 def test_export_mp3(tmp_path: Path) -> None:
     out = tmp_path / "out.mp3"
     result = export_pages(PAGES, [1, 2], out, FakeEngine())
