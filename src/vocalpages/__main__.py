@@ -21,6 +21,11 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
 
+    from vocalpages import theme
+
+    theme.load_fonts()
+    app.setStyleSheet(theme.build_stylesheet(theme.LIGHT))
+
     from vocalpages.gui import MainWindow  # imported after QApplication exists
 
     window = MainWindow()

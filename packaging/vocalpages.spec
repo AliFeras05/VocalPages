@@ -8,7 +8,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas, binaries, hiddenimports = [], [], []
 # Packages that load data files, models or native libraries at runtime.
-for package in ("kokoro", "misaki", "espeakng_loader", "phonemizer", "spacy", "en_core_web_sm", "language_tags"):
+for package in ("vocalpages", "kokoro", "misaki", "espeakng_loader", "phonemizer", "spacy", "en_core_web_sm", "language_tags"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(package)
     datas += pkg_datas
     binaries += pkg_binaries
