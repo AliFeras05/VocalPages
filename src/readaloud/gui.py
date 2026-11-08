@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QMimeData, QObject, Qt, QThread, Slot
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressDialog,
+    QSplitter,
     QPushButton,
     QSpinBox,
     QStackedWidget,
@@ -36,11 +38,12 @@ from PySide6.QtWidgets import (
 )
 
 from readaloud import APP_NAME
-from readaloud.document import DocumentError, load_document
+from readaloud.document import Document, DocumentError
 from readaloud.export import ExportResult, output_format, resolve_section_range
 from readaloud.export_dialog import ExportWorker, RangeDialog
 from readaloud.playback import PlayerState, Reader
-from readaloud.state import ResumeStore, fingerprint
+from readaloud.library import BookRecord, Library
+from readaloud.sidebar import LibrarySidebar
 from readaloud.sentences import locate_sentences, sentence_at
 from readaloud.tts import KokoroEngine
 
@@ -87,18 +90,17 @@ class MainWindow(QMainWindow):
     """Main application window."""
 
     def __init__(
-        self, engine: KokoroEngine | None = None, resume_store: ResumeStore | None = None
+        self, engine: KokoroEngine | None = None, library: Library | None = None
     ) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.resize(900, 700)
+        self.resize(1100, 720)
         self.setAcceptDrops(True)
 
         self._engine = engine or KokoroEngine()
         self._reader = Reader(self._engine, self)
-        self._store = resume_store or ResumeStore()
-        self._doc_key = ""
-        self._doc_stem = ""
+        self._library = library or Library()
+        self._book: BookRecord | None = None
         self._export_thread: QThread | None = None
         self._export_worker: ExportWorker | None = None
         self._export_progress: QProgressDialog | None = None
@@ -107,7 +109,8 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_layout()
         self._connect_reader()
-        self._update_controls()
+        self._refresh_sidebar()
+        self.show_home()
         self.statusBar().showMessage("Loading voice model…")
 
     # ----- construction -------------------------------------------------
@@ -116,6 +119,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Playback", self)
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+        self.toolbar = toolbar
 
         self.open_action = QAction("Open PDF…", self, shortcut=QKeySequence.StandardKey.Open)
         self.open_action.triggered.connect(self.choose_file)
@@ -185,11 +189,24 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget(self)
         self.stack.addWidget(start_container)
         self.stack.addWidget(reading_view)
-        self.setCentralWidget(self.stack)
+
+        self.sidebar = LibrarySidebar(self)
+        self.sidebar.home_requested.connect(self.show_home)
+        self.sidebar.book_selected.connect(self.open_book)
+        self.sidebar.remove_requested.connect(self._confirm_remove)
+
+        splitter = QSplitter(self)
+        splitter.addWidget(self.sidebar)
+        splitter.addWidget(self.stack)
+        splitter.setStretchFactor(1, 1)
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizes([260, 840])
+        self.setCentralWidget(splitter)
 
     def _connect_reader(self) -> None:
         self._reader.section_changed.connect(self._show_section)
         self._reader.position_changed.connect(self._highlight_segment)
+        self._reader.position_changed.connect(self._save_position)
         self._reader.section_skipped.connect(self._on_section_skipped)
         self._reader.state_changed.connect(lambda _state: self._update_controls())
         self._reader.finished.connect(lambda: self.statusBar().showMessage("Finished reading.", 5000))
@@ -206,47 +223,94 @@ class MainWindow(QMainWindow):
             self.open_file(Path(path))
 
     def open_file(self, path: Path) -> None:
-        """Load the document at ``path`` and show its first (or saved) section."""
+        """Add the file at ``path`` to the library (or find it there) and open it."""
         try:
-            document = load_document(path)
+            record, document, _is_new = self._library.add(path)
         except DocumentError as exc:
             self._show_error(str(exc))
             return
+        except OSError:
+            self._show_error(f"Could not read {path.name}.")
+            return
+        self._show_document(record, document)
+
+    @Slot(str)
+    def open_book(self, book_id: str) -> None:
+        """Open a library book exactly where it was left off."""
+        if self._book is not None and self._book.id == book_id and self.stack.currentIndex() == 1:
+            return
+        record = self._library.get(book_id)
+        if record is None:
+            return
+        try:
+            document = self._library.load(book_id)
+        except (DocumentError, OSError) as exc:
+            self._show_error(f"Could not open “{record.title}”: {exc}")
+            return
+        self._show_document(record, document)
+
+    @Slot()
+    def show_home(self) -> None:
+        """Stop reading and show the home page."""
+        self._reader.stop()
+        self.stack.setCurrentIndex(0)
+        self.toolbar.setVisible(False)
+        self.sidebar.select(None)
+        self.setWindowTitle(APP_NAME)
+        self.statusBar().clearMessage()
+
+    def _show_document(self, record: BookRecord, document: Document) -> None:
         if not document.section_count:
             self._show_error("This document has nothing to read.")
             return
-
-        self._doc_key = ""  # don't record the old document's key while switching
+        self._book = None  # don't save positions while the new book loads
         self.stack.setCurrentIndex(1)
+        self.toolbar.setVisible(True)
         self.setWindowTitle(f"{document.title} — {APP_NAME}")
-        self._doc_stem = path.stem
-        unit = document.unit
-        self.goto_label.setText(f" Go to {unit.lower()} ")
-        key = fingerprint(path)
-        start = self._ask_resume_section(key, unit, document.section_count)
-        self._reader.set_document(document, start_section=start)
-        self._doc_key = key
-        self._store.set(key, self._reader.current_section)
+        self.goto_label.setText(f" Go to {document.unit.lower()} ")
+        self._reader.set_document(document, start_section=record.section, start_sentence=record.sentence)
+        self._book = record
+        self._refresh_sidebar()
         empty = sum(1 for section in document.sections if not section.has_text)
         if empty:
             self.statusBar().showMessage(
-                f"{empty} {unit.lower()}(s) have no readable text (scanned?) and will be skipped.", 8000
+                f"{empty} {document.unit.lower()}(s) have no readable text (scanned?) and will be skipped.",
+                8000,
             )
         self._update_controls()
 
-    def _ask_resume_section(self, key: str, unit: str, count: int) -> int:
-        """Offer to resume from the saved section; return the section to start on."""
-        saved = self._store.get(key)
-        if saved is None or saved <= 1 or saved > count:
-            return 1
+    @Slot(str)
+    def _confirm_remove(self, book_id: str) -> None:
+        record = self._library.get(book_id)
+        if record is None:
+            return
         answer = QMessageBox.question(
             self,
             APP_NAME,
-            f"You stopped at {unit.lower()} {saved} of {count} last time. Resume from there?",
+            f"Remove “{record.title}” from the library?\n\n"
+            "Your original file is not deleted; only Readaloud's copy and reading position are.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.No,
         )
-        return saved if answer == QMessageBox.StandardButton.Yes else 1
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self._book is not None and self._book.id == book_id:
+            self._book = None
+            self.show_home()
+        self._library.remove(book_id)
+        self._refresh_sidebar()
+
+    @Slot(int, int)
+    def _save_position(self, section: int, sentence: int) -> None:
+        if self._book is None:
+            return
+        self._library.save_position(self._book.id, section, sentence)
+        if section != self._book.section:
+            self._book = replace(self._book, section=section, sentence=sentence)
+            self.sidebar.update_progress(self._book.id, self._book.progress_text)
+
+    def _refresh_sidebar(self) -> None:
+        self.sidebar.set_books(self._library.books(), self._book.id if self._book else None)
 
     @Slot()
     def _jump_to_spin_section(self) -> None:
@@ -268,7 +332,8 @@ class MainWindow(QMainWindow):
             self._show_error(str(exc))
             return
 
-        suggested = str(Path.home() / f"{self._doc_stem}.mp3")
+        stem = Path(self._book.original_name).stem if self._book else document.title
+        suggested = str(Path.home() / f"{stem}.mp3")
         path, _ = QFileDialog.getSaveFileName(
             self, "Export audio", suggested, "MP3 audio (*.mp3);;WAV audio (*.wav)"
         )
@@ -364,8 +429,6 @@ class MainWindow(QMainWindow):
         self.section_spin.setMaximum(self._reader.section_count)
         self.section_spin.setValue(number)
         self.section_spin.blockSignals(False)
-        if self._doc_key:
-            self._store.set(self._doc_key, number)
         if section.has_text:
             self._spans = locate_sentences(section.text, list(section.sentences))
             self.text_view.setPlainText(section.text)
@@ -456,4 +519,5 @@ class MainWindow(QMainWindow):
             self._export_thread.quit()
             self._export_thread.wait()
         self._reader.shutdown()
+        self._library.close()
         super().closeEvent(event)
