@@ -18,6 +18,8 @@ dependencies = [
     "kokoro>=0.9.4",
     "pydub>=0.25",
     "platformdirs>=4.0",
+    "ebooklib>=0.18",
+    "beautifulsoup4>=4.12",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

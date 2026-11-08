@@ -64,7 +64,7 @@ class Document:
         return self.sections[number - 1]
 
 
-SUPPORTED_EXTENSIONS = (".pdf",)
+SUPPORTED_EXTENSIONS = (".pdf", ".epub")
 
 
 def load_document(path: str | Path) -> Document:
@@ -79,5 +79,9 @@ def load_document(path: str | Path) -> Document:
         from readaloud.pdf_extract import load_pdf
 
         return load_pdf(path)
+    if suffix == ".epub":
+        from readaloud.epub_extract import load_epub
+
+        return load_epub(path)
     supported = ", ".join(SUPPORTED_EXTENSIONS)
     raise UnsupportedFormatError(f"Unsupported file type '{suffix or 'none'}'. Supported: {supported}.")
