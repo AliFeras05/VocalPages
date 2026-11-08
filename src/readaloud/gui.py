@@ -31,6 +31,7 @@ from readaloud.state import ResumeStore, fingerprint
 from readaloud.tts import KokoroEngine, locate_segments, normalize_page_text
 
 HIGHLIGHT_COLOR = QColor(255, 230, 140)
+HIGHLIGHT_TEXT_COLOR = QColor(20, 20, 20)  # readable on the highlight in light and dark themes
 SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 
 
@@ -319,6 +320,7 @@ class MainWindow(QMainWindow):
         selection.cursor = cursor
         selection.format = QTextCharFormat()
         selection.format.setBackground(HIGHLIGHT_COLOR)
+        selection.format.setForeground(HIGHLIGHT_TEXT_COLOR)
         self.text_view.setExtraSelections([selection])
         view_cursor = QTextCursor(cursor)
         view_cursor.clearSelection()
