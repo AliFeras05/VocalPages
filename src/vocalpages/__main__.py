@@ -23,8 +23,7 @@ def main() -> int:
 
     from vocalpages import theme
 
-    theme.load_fonts()
-    app.setStyleSheet(theme.build_stylesheet(theme.LIGHT))
+    theme.load_fonts()  # the window applies the stylesheet for the chosen theme
 
     from vocalpages.gui import MainWindow  # imported after QApplication exists
 

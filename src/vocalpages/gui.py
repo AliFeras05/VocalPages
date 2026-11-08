@@ -18,6 +18,7 @@ from PySide6.QtGui import (
 
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -44,6 +45,7 @@ from vocalpages.reader_view import ReaderView
 from vocalpages.icons import IconSet
 from vocalpages.home import FILE_DIALOG_FILTER, HomePage, is_supported, local_file_from_mime
 from vocalpages.library import BookRecord, Library
+from vocalpages.settings import Settings, initial_theme, system_prefers_dark
 from vocalpages.sidebar import LibrarySidebar
 from vocalpages.sentences import locate_sentences, sentence_at
 from vocalpages.tts import KokoroEngine
@@ -55,7 +57,10 @@ class MainWindow(QMainWindow):
     """Main application window."""
 
     def __init__(
-        self, engine: KokoroEngine | None = None, library: Library | None = None
+        self,
+        engine: KokoroEngine | None = None,
+        library: Library | None = None,
+        settings_dir: Path | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
@@ -63,9 +68,11 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.icons = IconSet(theme.LIGHT, self)
+        self._theme = "light"
         self._engine = engine or KokoroEngine()
         self._reader = Reader(self._engine, self)
         self._library = library or Library()
+        self._settings = Settings(settings_dir or self._library.data_dir)
         self._book: BookRecord | None = None
         self._export_thread: QThread | None = None
         self._export_worker: ExportWorker | None = None
@@ -75,6 +82,7 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self._build_layout()
         self._connect_reader()
+        self.apply_theme(initial_theme(self._settings.theme, system_prefers_dark()))
         self._refresh_sidebar()
         self.show_home()
         self.statusBar().showMessage("Loading voice model…")
@@ -243,6 +251,12 @@ class MainWindow(QMainWindow):
         self.sidebar.book_selected.connect(self.open_book)
         self.sidebar.remove_requested.connect(self._confirm_remove)
 
+        self.theme_button = QToolButton(self)
+        self.theme_button.setObjectName("themeButton")
+        self.theme_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.theme_button.clicked.connect(self.toggle_theme)
+        self.sidebar.add_footer_widget(self.theme_button)
+
         splitter = QSplitter(self)
         splitter.addWidget(self.sidebar)
         splitter.addWidget(self.stack)
@@ -312,6 +326,33 @@ class MainWindow(QMainWindow):
             self._show_error(f"Could not open “{record.title}”: {exc}")
             return
         self._show_document(record, document)
+
+    @property
+    def theme_name(self) -> str:
+        """The active theme, "light" or "dark"."""
+        return self._theme
+
+    def apply_theme(self, name: str) -> None:
+        """Switch every screen to the ``name`` palette instantly (playback continues)."""
+        palette = theme.PALETTES[name]
+        self._theme = name
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(theme.build_stylesheet(palette))
+        self.icons.set_palette(palette)
+        self.text_view.set_palette(palette)
+        to_dark = name == "light"
+        label = "Switch to dark theme" if to_dark else "Switch to light theme"
+        self.theme_button.setToolTip(label)
+        self.theme_button.setAccessibleName(label)
+        self.icons.bind(self.theme_button, "moon" if to_dark else "sun")
+
+    @Slot()
+    def toggle_theme(self) -> None:
+        """Switch between light and dark and remember the choice."""
+        new = "dark" if self._theme == "light" else "light"
+        self.apply_theme(new)
+        self._settings.theme = new
 
     @Slot()
     def show_home(self) -> None:
