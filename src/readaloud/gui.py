@@ -8,11 +8,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QColor, QKeySequence, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QSpinBox,
     QTextEdit,
     QToolBar,
     QVBoxLayout,
@@ -22,22 +24,27 @@ from PySide6.QtWidgets import (
 from readaloud import APP_NAME
 from readaloud.pdf_extract import PdfError, extract_pages
 from readaloud.playback import PlayerState, Reader
+from readaloud.state import ResumeStore, fingerprint
 from readaloud.tts import KokoroEngine, locate_segments, normalize_page_text
 
 HIGHLIGHT_COLOR = QColor(255, 230, 140)
+SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 
 
 class MainWindow(QMainWindow):
     """Main application window."""
 
-    def __init__(self, engine: KokoroEngine | None = None) -> None:
+    def __init__(
+        self, engine: KokoroEngine | None = None, resume_store: ResumeStore | None = None
+    ) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.resize(900, 700)
 
         self._engine = engine or KokoroEngine()
         self._reader = Reader(self._engine, self)
-        self._pdf_name = ""
+        self._store = resume_store or ResumeStore()
+        self._pdf_key = ""
         self._spans: list[tuple[int, int]] = []
 
         self._build_actions()
@@ -59,9 +66,35 @@ class MainWindow(QMainWindow):
         self.play_action.triggered.connect(self._toggle_play)
         self.stop_action = QAction("Stop", self)
         self.stop_action.triggered.connect(self._reader.stop)
+        self.prev_action = QAction("◀ Previous", self, shortcut=QKeySequence.StandardKey.MoveToPreviousPage)
+        self.prev_action.triggered.connect(lambda: self._reader.go_to_page(self._reader.current_page - 1))
+        self.next_action = QAction("Next ▶", self, shortcut=QKeySequence.StandardKey.MoveToNextPage)
+        self.next_action.triggered.connect(lambda: self._reader.go_to_page(self._reader.current_page + 1))
 
-        for action in (self.open_action, self.play_action, self.stop_action):
+        for action in (self.open_action, self.play_action, self.stop_action, self.prev_action, self.next_action):
             toolbar.addAction(action)
+
+        toolbar.addSeparator()
+        toolbar.addWidget(QLabel(" Go to page ", self))
+        self.page_spin = QSpinBox(self)
+        self.page_spin.setMinimum(1)
+        self.page_spin.setKeyboardTracking(False)
+        self.page_spin.editingFinished.connect(self._jump_to_spin_page)
+        toolbar.addWidget(self.page_spin)
+        self.go_action = QAction("Go", self)
+        self.go_action.triggered.connect(self._jump_to_spin_page)
+        toolbar.addAction(self.go_action)
+
+        toolbar.addSeparator()
+        toolbar.addWidget(QLabel(" Speed ", self))
+        self.speed_combo = QComboBox(self)
+        for speed in SPEEDS:
+            self.speed_combo.addItem(f"{speed:g}×", speed)
+        self.speed_combo.setCurrentIndex(SPEEDS.index(1.0))
+        self.speed_combo.currentIndexChanged.connect(
+            lambda _i: self._reader.set_speed(self.speed_combo.currentData())
+        )
+        toolbar.addWidget(self.speed_combo)
 
     def _build_layout(self) -> None:
         self.page_label = QLabel("No PDF open", self)
@@ -108,15 +141,37 @@ class MainWindow(QMainWindow):
             self._show_error("This PDF has no pages.")
             return
 
-        self._pdf_name = path.name
+        self._pdf_key = ""  # don't record the old PDF's key while switching
         self.setWindowTitle(f"{path.name} — {APP_NAME}")
-        self._reader.set_pages(pages)
+        key = fingerprint(path)
+        self._reader.set_pages(pages, start_page=self._ask_resume_page(key, len(pages)))
+        self._pdf_key = key
+        self._store.set(key, self._reader.current_page)
         empty = sum(1 for p in pages if not p.has_text)
         if empty:
             self.statusBar().showMessage(
                 f"{empty} page(s) have no extractable text (scanned?) and will be skipped.", 8000
             )
         self._update_controls()
+
+    def _ask_resume_page(self, key: str, page_count: int) -> int:
+        """Offer to resume from the saved page; return the page to start on."""
+        saved = self._store.get(key)
+        if saved is None or saved <= 1 or saved > page_count:
+            return 1
+        answer = QMessageBox.question(
+            self,
+            APP_NAME,
+            f"You stopped at page {saved} of {page_count} last time. Resume from there?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        return saved if answer == QMessageBox.StandardButton.Yes else 1
+
+    @Slot()
+    def _jump_to_spin_page(self) -> None:
+        if self.page_spin.value() != self._reader.current_page:
+            self._reader.go_to_page(self.page_spin.value())
 
     @Slot()
     def _toggle_play(self) -> None:
@@ -131,6 +186,12 @@ class MainWindow(QMainWindow):
     def _show_page(self, number: int) -> None:
         page = self._reader.page(number)
         self.page_label.setText(f"Page {number} of {self._reader.page_count}")
+        self.page_spin.blockSignals(True)
+        self.page_spin.setMaximum(self._reader.page_count)
+        self.page_spin.setValue(number)
+        self.page_spin.blockSignals(False)
+        if self._pdf_key:
+            self._store.set(self._pdf_key, number)
         if page.has_text:
             display = normalize_page_text(page.text)
             self._spans = locate_segments(display, self._reader.segments(number))
@@ -176,6 +237,11 @@ class MainWindow(QMainWindow):
         has_doc = self._reader.page_count > 0
         state = self._reader.state
         self.play_action.setEnabled(has_doc)
+        current = self._reader.current_page
+        self.prev_action.setEnabled(has_doc and current > 1)
+        self.next_action.setEnabled(has_doc and current < self._reader.page_count)
+        self.page_spin.setEnabled(has_doc)
+        self.go_action.setEnabled(has_doc)
         self.play_action.setText("Pause" if state is PlayerState.PLAYING else
                                  "Resume" if state is PlayerState.PAUSED else "Play")
         self.stop_action.setEnabled(state is not PlayerState.STOPPED)
