@@ -34,7 +34,7 @@ A desktop app that reads PDF and EPUB books aloud like an audiobook, using a loc
 
 ## Installation
 
-VocalPages needs **Python 3.11 or 3.12** (the voice engine doesn't support 3.13 yet) and, for MP3 export, **ffmpeg**. The install takes about 2 GB of disk space, mostly for PyTorch. The first launch also downloads the voice model (about 330 MB) once. After that, everything runs offline.
+VocalPages is tested on **Windows** and **macOS**: the automated tests run on both for every push, and the app has been installed and used on both. It needs **Python 3.11 or 3.12** (the voice engine doesn't support 3.13 yet) and, for MP3 export, **ffmpeg**. The install takes about 2 GB of disk space, mostly for PyTorch. The first launch also downloads the voice model (about 330 MB) once. After that, everything runs offline.
 
 ### Windows
 
@@ -198,7 +198,6 @@ Only the original file *name* is stored for reference, never its folder path. To
 
 ## Known limitations
 
-- **Windows testing:** the automated tests pass on Windows, and the app is developed on macOS. Audio playback and drag-and-drop on Windows have not been checked by hand yet. Please open an issue if something doesn't work.
 - **Following the OS theme** relies on Qt reporting the system color scheme (Qt 6.5+). This works on Windows 10/11 and macOS. On some Linux desktops Qt reports "unknown", and the app starts in the light theme.
 - **No OCR.** Scanned or image-only pages are skipped.
 - **EPUB chapters follow the book's files.** Each spine document is one chapter. Some books put several chapters in one file (or split one chapter across files), so "chapter" counts and export ranges follow the file layout, not necessarily the printed chapters.
