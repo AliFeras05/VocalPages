@@ -34,56 +34,78 @@ A desktop app that reads PDF and EPUB books aloud like an audiobook, using a loc
 
 ## Installation
 
-You need **Python 3.11 or 3.12** (the voice engine doesn't support 3.13 yet) and, for MP3 export, **ffmpeg**.
+VocalPages needs **Python 3.11 or 3.12** (the voice engine doesn't support 3.13 yet) and, for MP3 export, **ffmpeg**. The install takes about 2 GB of disk space, mostly for PyTorch. The first launch also downloads the voice model (about 330 MB) once. After that, everything runs offline.
+
+### Windows
+
+1. Install Python 3.12, Git and ffmpeg. In **PowerShell**:
+
+   ```powershell
+   winget install Python.Python.3.12 Git.Git Gyan.FFmpeg
+   ```
+
+   Then close and reopen PowerShell so the new commands are found. You can also use the installers from [python.org](https://www.python.org/downloads/windows/), [git-scm.com](https://git-scm.com/download/win) and [ffmpeg.org](https://ffmpeg.org/download.html).
+
+2. Download and install VocalPages:
+
+   ```powershell
+   git clone https://github.com/AliFeras05/VocalPages.git
+   cd VocalPages
+   py -3.12 -m venv .venv
+   .venv\Scripts\pip install .
+   ```
+
+3. Start it:
+
+   ```powershell
+   .venv\Scripts\vocalpages
+   ```
+
+<details>
+<summary>Troubleshooting on Windows</summary>
+
+- **`py` is not recognized:** Python isn't installed or wasn't added to `PATH`. Reinstall it from python.org and tick **Add python.exe to PATH**.
+- **PyTorch fails to load (a `DLL load failed` error):** install the [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist).
+- **MP3 export says ffmpeg is missing:** make sure `ffmpeg -version` works in a new PowerShell window. WAV export works without ffmpeg.
+- **`Error processing file '...phontab'`:** the folder path is too long for the voice engine. Clone into a short path such as `C:\VocalPages`.
+</details>
+
+### macOS and Linux
 
 ```bash
+# macOS: brew install python@3.12 ffmpeg
+# Ubuntu/Debian: sudo apt install python3.12 python3.12-venv ffmpeg
 git clone https://github.com/AliFeras05/VocalPages.git
 cd VocalPages
 python3.12 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install .
-vocalpages
+.venv/bin/pip install .
+.venv/bin/vocalpages
 ```
-
-The first launch downloads the voice model (about 330 MB) once. After that, everything runs offline.
-
-<details>
-<summary>Don't have Python 3.12 or ffmpeg?</summary>
-
-- **macOS:** `brew install python@3.12 ffmpeg`
-- **Ubuntu/Debian:** `sudo apt install python3.12 python3.12-venv ffmpeg`
-- **Windows:** install Python 3.12 from [python.org](https://www.python.org/downloads/) and ffmpeg from [ffmpeg.org](https://ffmpeg.org/download.html), and add `ffmpeg` to your `PATH`.
-
-The install needs about 2 GB of disk space, mostly for PyTorch.
-</details>
 
 ## Usage
 
 ### Desktop app
 
-```bash
-vocalpages                 # or: python -m vocalpages
-vocalpages path/to/book.pdf
-```
+Start VocalPages with `.venv\Scripts\vocalpages` on Windows (`.venv/bin/vocalpages` on macOS and Linux). You can also pass a book: `.venv\Scripts\vocalpages C:\Books\novel.epub`.
 
-The window opens on the home page: drag a PDF or EPUB onto it or click **Choose a file**. The book is added to the library sidebar and opened. Click a sentence to start reading from it. The first launch takes a little longer while the voice model loads; the status bar says when it is ready.
+The window opens on the home page: drag a PDF or EPUB onto it or click **Choose a file**. The book is added to the library sidebar and opened. Click a sentence to start reading from it. The first launch takes a little longer while the voice model loads; the bottom of the sidebar says when it is ready.
 
-Adding a book that is already in the library (same contents, any file name) opens the existing entry. To remove a book, click its **✕** or right-click it and choose **Remove from library…**. This only removes VocalPages' copy and your reading position; your original file is never touched.
+Adding a book that is already in the library (same contents, any file name) opens the existing entry. To remove a book, click its trash icon or right-click it and choose **Remove from library…**. This only removes VocalPages' copy and your reading position; your original file is never touched.
 
 Set `VOCALPAGES_LOG_LEVEL=INFO` (or `DEBUG`) to see diagnostic logging in the terminal.
 
 | Control | Shortcut |
 | --- | --- |
-| Open a book | Ctrl/Cmd+O (or the folder icon) |
+| Open a book | Ctrl+O, ⌘O on macOS (or the folder icon) |
 | Play / Pause / Resume | Space |
 | Previous / Next page or chapter | Page Up / Page Down |
-| Export audio | Ctrl/Cmd+E |
+| Export audio | Ctrl+E, ⌘E on macOS |
 
 Speed changes take effect from the next sentence.
 
-### Build a double-click app (macOS)
+### Build a standalone app (optional)
 
-To launch VocalPages from Finder, the Dock or Launchpad with no terminal, build a standalone `VocalPages.app` with PyInstaller:
+To launch VocalPages without a terminal, you can build a standalone app with PyInstaller. This has been tested on macOS only:
 
 ```bash
 python -m pip install -e ".[app]"
@@ -93,23 +115,27 @@ pyinstaller --noconfirm packaging/vocalpages.spec
 
 The app appears at `dist/VocalPages.app` (about 1 GB, mostly PyTorch). Drag it into your Applications folder, then open it and drop a PDF or EPUB onto the window. The voice model is still downloaded on first launch and cached in your user folder. MP3 export uses the system `ffmpeg` (Homebrew's is found automatically).
 
-The same spec builds a `dist/VocalPages/` folder app on Windows and Linux. That build is untested.
+On Windows and Linux the same command builds a `dist\VocalPages\` folder containing `VocalPages.exe` (or `VocalPages`), but that build is untested.
 
 ### Command line
 
 Synthesize a single page (PDF) or chapter (EPUB) to a WAV file:
 
-```bash
-vocalpages-cli path/to/book.pdf --page 3 --out page3.wav --speed 1.25
-vocalpages-cli path/to/book.epub --chapter 2 --out chapter2.wav
+```powershell
+.venv\Scripts\vocalpages-cli book.pdf --page 3 --out page3.wav --speed 1.25
+.venv\Scripts\vocalpages-cli book.epub --chapter 2 --out chapter2.wav
 ```
+
+(Use `.venv/bin/vocalpages-cli` on macOS and Linux.)
 
 ### Run the tests
 
-```bash
-pip install -e ".[dev]"
-pytest
+```powershell
+.venv\Scripts\pip install -e ".[dev]"
+.venv\Scripts\pytest
 ```
+
+The tests run automatically on Windows and macOS for every push (see the badge above).
 
 The tests build their own small PDFs and EPUBs at runtime and use a fake TTS engine and a temporary library folder, so they run in about a second and need neither the model nor any of your books.
 
@@ -154,9 +180,9 @@ The library lives in your platform's user data directory (via `platformdirs`), n
 
 | OS | Folder |
 | --- | --- |
+| Windows | `%LOCALAPPDATA%\vocalpages\` (for example `C:\Users\<you>\AppData\Local\vocalpages\`) |
 | macOS | `~/Library/Application Support/vocalpages/` |
 | Linux | `~/.local/share/vocalpages/` (or `$XDG_DATA_HOME/vocalpages/`) |
-| Windows | `%LOCALAPPDATA%\vocalpages\` |
 
 Inside it:
 
@@ -172,7 +198,8 @@ Only the original file *name* is stored for reference, never its folder path. To
 
 ## Known limitations
 
-- **Following the OS theme** relies on Qt reporting the system color scheme (Qt 6.5+). This works on macOS and Windows 10/11. On some Linux desktops Qt reports "unknown", and the app starts in the light theme.
+- **Windows testing:** the automated tests pass on Windows, and the app is developed on macOS. Audio playback and drag-and-drop on Windows have not been checked by hand yet. Please open an issue if something doesn't work.
+- **Following the OS theme** relies on Qt reporting the system color scheme (Qt 6.5+). This works on Windows 10/11 and macOS. On some Linux desktops Qt reports "unknown", and the app starts in the light theme.
 - **No OCR.** Scanned or image-only pages are skipped.
 - **EPUB chapters follow the book's files.** Each spine document is one chapter. Some books put several chapters in one file (or split one chapter across files), so "chapter" counts and export ranges follow the file layout, not necessarily the printed chapters.
 - **DRM-protected EPUBs** (Adobe, Apple, Kindle conversions with DRM) cannot be read.
@@ -183,7 +210,7 @@ Only the original file *name* is stored for reference, never its folder path. To
 - **Speed changes** apply from the next sentence, not mid-sentence.
 - **Synthesis speed depends on your CPU/GPU.** On slow machines there can be a short pause between sentences, and exporting a whole book can take a long time.
 - **Long exports to MP3** are converted in memory by pydub at the end, which needs RAM roughly the size of the uncompressed audio (about 170 MB per hour). WAV export streams to disk.
-- **Install path length:** espeak-ng (used by Kokoro's phonemizer) fails with `Error processing file '.../phontab'` if the virtual environment is in a very deep directory (around 160 characters to the `espeak-ng-data` folder). Use a shorter path if you see this.
+- **Install path length:** espeak-ng (used by Kokoro's phonemizer) fails with `Error processing file '.../phontab'` if the virtual environment is in a very deep directory (around 160 characters to the `espeak-ng-data` folder). Use a shorter path, such as `C:\VocalPages`, if you see this.
 - Python 3.13 is not supported because of Kokoro, and pydub relies on the `audioop` module that 3.13 removed.
 
 ## Design and credits
